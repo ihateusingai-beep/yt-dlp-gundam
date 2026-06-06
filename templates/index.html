@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gundam NT-D Download Console</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0a0f1a;
+            --bg-panel: #0d1424;
+            --cyan: #00D4FF;
+            --cyan-dim: #006680;
+            --pink: #FF69B4;
+            --pink-dim: #993d66;
+            --text: #c0e8ff;
+            --text-dim: #4a6a8a;
+            --success: #00FF88;
+            --warning: #FFB800;
+            --danger: #FF3366;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: var(--bg-dark);
+            color: var(--text);
+            font-family: 'Share Tech Mono', monospace;
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* Scanlines Overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 212, 255, 0.03) 2px,
+                rgba(0, 212, 255, 0.03) 4px
+            );
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        /* CRT Flicker */
+        @keyframes flicker {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.98; }
+        }
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.3) 100%);
+            pointer-events: none;
+            z-index: 9998;
+            animation: flicker 0.1s infinite;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            padding: 20px 0 30px;
+            border-bottom: 2px solid var(--cyan-dim);
+            margin-bottom: 30px;
+            position: relative;
+        }
+
+        .header::before,
+        .header::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--cyan);
+        }
+
+        .header::before {
+            left: 0;
+            border-right: none;
+            border-top: none;
+        }
+
+        .header::after {
+            right: 0;
+            border-left: none;
+            border-top: none;
+        }
+
+        .title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 900;
+            color: var(--cyan);
+            text-shadow: 0 0 20px var(--cyan), 0 0 40px var(--cyan-dim);
+            letter-spacing: 4px;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: var(--pink);
+            font-size: 0.9rem;
+            letter-spacing: 6px;
+            text-transform: uppercase;
+        }
+
+        /* Energy Bar */
+        .energy-bar-container {
+            background: var(--bg-panel);
+            border: 1px solid var(--cyan-dim);
+            padding: 15px 20px;
+            margin-bottom: 25px;
+            position: relative;
+        }
+
+        .energy-bar-container::before {
+            content: 'SYSTEM POWER';
+            position: absolute;
+            top: -10px;
+            left: 20px;
+            background: var(--bg-dark);
+            padding: 0 10px;
+            font-size: 0.7rem;
+            color: var(--cyan);
+            letter-spacing: 2px;
+        }
+
+        .energy-bar {
+            height: 30px;
+            background: linear-gradient(90deg, var(--pink-dim) 0%, var(--pink) 50%, var(--cyan) 100%);
+            border-radius: 2px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .energy-bar::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(
+                90deg,
+                transparent,
+                transparent 10px,
+                rgba(0,0,0,0.3) 10px,
+                rgba(0,0,0,0.3) 20px
+            );
+        }
+
+        .energy-bar-pulse {
+            position: absolute;
+            top: 0; left: -50px;
+            width: 50px;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+            animation: energyPulse 2s infinite;
+        }
+
+        @keyframes energyPulse {
+            0% { left: -50px; }
+            100% { left: 100%; }
+        }
+
+        /* HUD Corners */
+        .hud-panel {
+            position: relative;
+            background: var(--bg-panel);
+            border: 1px solid var(--cyan-dim);
+            padding: 25px;
+            margin-bottom: 25px;
+        }
+
+        .hud-panel::before,
+        .hud-panel::after,
+        .hud-panel .corner-bl,
+        .hud-panel .corner-br {
+            content: '';
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            border: 2px solid var(--cyan);
+        }
+
+        .hud-panel::before {
+            top: -1px; left: -1px;
+            border-right: none;
+            border-bottom: none;
+        }
+
+        .hud-panel::after {
+            top: -1px; right: -1px;
+            border-left: none;
+            border-bottom: none;
+        }
+
+        .hud-panel .corner-bl {
+            bottom: -1px; left: -1px;
+            border-right: none;
+            border-top: none;
+        }
+
+        .hud-panel .corner-br {
+            bottom: -1px; right: -1px;
+            border-left: none;
+            border-top: none;
+        }
+
+        .panel-title {
+            font-family: 'Orbitron', sans-serif;
+            color: var(--cyan);
+            font-size: 0.8rem;
+            letter-spacing: 3px;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--cyan-dim);
+        }
+
+        /* Form Elements */
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        .input-label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-dim);
+            font-size: 0.75rem;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .input-field {
+            width: 100%;
+            background: rgba(0, 212, 255, 0.05);
+            border: 1px solid var(--cyan-dim);
+            color: var(--text);
+            padding: 15px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: var(--cyan);
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.2), inset 0 0 20px rgba(0, 212, 255, 0.05);
+        }
+
+        .input-field::placeholder {
+            color: var(--text-dim);
+        }
+
+        /* Buttons */
+        .btn {
+            background: linear-gradient(180deg, var(--cyan-dim) 0%, #004d60 100%);
+            border: 1px solid var(--cyan);
+            color: var(--cyan);
+            padding: 15px 30px;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.9rem;
+            font-weight: 700;
+            letter-spacing: 3px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0; left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.3), transparent);
+            transition: left 0.5s ease;
+        }
+
+        .btn:hover {
+            background: linear-gradient(180deg, var(--cyan) 0%, var(--cyan-dim) 100%);
+            color: var(--bg-dark);
+            box-shadow: 0 0 30px rgba(0, 212, 255, 0.5);
+        }
+
+        .btn:hover::before {
+            left: 100%;
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Select Dropdown */
+        .select-field {
+            width: 100%;
+            background: rgba(0, 212, 255, 0.05);
+            border: 1px solid var(--cyan-dim);
+            color: var(--text);
+            padding: 15px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 1rem;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2300D4FF' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 15px center;
+        }
+
+        .select-field:focus {
+            outline: none;
+            border-color: var(--cyan);
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.2);
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            margin: 25px 0;
+        }
+
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 0.8rem;
+        }
+
+        .progress-bar {
+            height: 25px;
+            background: rgba(0, 212, 255, 0.1);
+            border: 1px solid var(--cyan-dim);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--cyan-dim), var(--cyan));
+            width: 0%;
+            transition: width 0.3s ease;
+            position: relative;
+        }
+
+        .progress-fill::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(
+                45deg,
+                transparent,
+                transparent 5px,
+                rgba(255,255,255,0.1) 5px,
+                rgba(255,255,255,0.1) 10px
+            );
+        }
+
+        .progress-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 0.75rem;
+            font-weight: bold;
+            color: var(--text);
+            text-shadow: 0 0 5px var(--bg-dark);
+            z-index: 1;
+        }
+
+        /* Video Preview */
+        .preview-container {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--cyan-dim);
+            padding: 20px;
+            text-align: center;
+            min-height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+
+        .preview-placeholder {
+            color: var(--text-dim);
+            font-size: 0.85rem;
+        }
+
+        .preview-placeholder::before {
+            content: '[ NO SIGNAL ]';
+            display: block;
+            font-size: 1.2rem;
+            color: var(--cyan-dim);
+            margin-bottom: 15px;
+            letter-spacing: 3px;
+        }
+
+        .preview-image {
+            max-width: 100%;
+            max-height: 300px;
+            border: 1px solid var(--cyan-dim);
+        }
+
+        /* Status Display */
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .status-item {
+            background: rgba(0, 212, 255, 0.05);
+            border: 1px solid var(--cyan-dim);
+            padding: 15px;
+            text-align: center;
+        }
+
+        .status-label {
+            font-size: 0.65rem;
+            color: var(--text-dim);
+            letter-spacing: 2px;
+            margin-bottom: 5px;
+        }
+
+        .status-value {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.1rem;
+            color: var(--cyan);
+        }
+
+        /* Celebration Animation */
+        .celebration-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 10000;
+            display: none;
+        }
+
+        .celebration-overlay.active {
+            display: block;
+            animation: celebrationFlash 0.5s ease-out;
+        }
+
+        @keyframes celebrationFlash {
+            0% { background: rgba(0, 212, 255, 0.5); }
+            100% { background: transparent; }
+        }
+
+        .particle {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background: var(--cyan);
+            box-shadow: 0 0 10px var(--cyan);
+        }
+
+        @keyframes particleExplode {
+            0% { transform: translate(0, 0) scale(1); opacity: 1; }
+            100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
+        }
+
+        /* Completion Message */
+        .completion-message {
+            text-align: center;
+            padding: 30px;
+            display: none;
+        }
+
+        .completion-message.active {
+            display: block;
+            animation: completionPulse 1s infinite;
+        }
+
+        @keyframes completionPulse {
+            0%, 100% { text-shadow: 0 0 20px var(--cyan); }
+            50% { text-shadow: 0 0 40px var(--cyan), 0 0 60px var(--pink); }
+        }
+
+        .completion-text {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.5rem;
+            color: var(--success);
+            letter-spacing: 5px;
+        }
+
+        /* Grid Lines Background */
+        .grid-bg {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: 
+                linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            z-index: 0;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .title { font-size: 1.5rem; }
+            .container { padding: 10px; }
+            .hud-panel { padding: 15px; }
+        }
+
+        /* NT-D Mode Indicator */
+        .ntd-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: linear-gradient(90deg, var(--pink-dim), transparent);
+            padding: 5px 15px;
+            margin-top: 10px;
+        }
+
+        .ntd-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--pink);
+            border-radius: 50%;
+            animation: ntdPulse 1s infinite;
+        }
+
+        @keyframes ntdPulse {
+            0%, 100% { box-shadow: 0 0 5px var(--pink); }
+            50% { box-shadow: 0 0 15px var(--pink), 0 0 25px var(--pink); }
+        }
+
+        .ntd-text {
+            font-size: 0.7rem;
+            color: var(--pink);
+            letter-spacing: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="grid-bg"></div>
+    
+    <div class="celebration-overlay" id="celebrationOverlay"></div>
+
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1 class="title">GUNDAM NT-D</h1>
+            <p class="subtitle">Combat Data Download System</p>
+            <div class="ntd-indicator">
+                <span class="ntd-dot"></span>
+                <span class="ntd-text">NT-D ACTIVE</span>
+            </div>
+        </header>
+
+        <!-- Energy Bar -->
+        <div class="energy-bar-container">
+            <div class="energy-bar">
+                <div class="energy-bar-pulse"></div>
+            </div>
+        </div>
+
+        <!-- URL Input Panel -->
+        <div class="hud-panel">
+            <div class="corner-bl"></div>
+            <div class="corner-br"></div>
+            <h2 class="panel-title">// TARGET ACQUISITION</h2>
+            <div class="input-group">
+                <label class="input-label">Video URL</label>
+                <input type="text" class="input-field" id="urlInput" placeholder="Enter video URL to download...">
+            </div>
+            <button class="btn" id="analyzeBtn">Analyze Target</button>
+        </div>
+
+        <!-- Video Preview Panel -->
+        <div class="hud-panel">
+            <div class="corner-bl"></div>
+            <div class="corner-br"></div>
+            <h2 class="panel-title">// VISUAL TRACKING</h2>
+            <div class="preview-container" id="previewContainer">
+                <div class="preview-placeholder">AWAITING TARGET LOCK</div>
+            </div>
+            <div class="status-grid" id="previewStats" style="display: none;">
+                <div class="status-item">
+                    <div class="status-label">RESOLUTION</div>
+                    <div class="status-value" id="videoRes">--</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">DURATION</div>
+                    <div class="status-value" id="videoDuration">--</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">SIZE</div>
+                    <div class="status-value" id="videoSize">--</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Format Selection Panel -->
+        <div class="hud-panel">
+            <div class="corner-bl"></div>
+            <div class="corner-br"></div>
+            <h2 class="panel-title">// FORMAT SELECTION</h2>
+            <div class="input-group">
+                <label class="input-label">Download Format</label>
+                <select class="select-field" id="formatSelect">
+                    <option value="">-- SELECT FORMAT --</option>
+                    <option value="best">Best Quality (Auto)</option>
+                    <option value="bestvideo+bestaudio">Best Video + Audio (Merged)</option>
+                    <option value="bestvideo">Best Video Only</option>
+                    <option value="bestaudio">Audio Only</option>
+                    <option value="mp4">MP4 Format</option>
+                    <option value="webm">WebM Format</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Download Progress Panel -->
+        <div class="hud-panel">
+            <div class="corner-bl"></div>
+            <div class="corner-br"></div>
+            <h2 class="panel-title">// DOWNLOAD SEQUENCE</h2>
+            <button class="btn" id="downloadBtn" disabled>Initialize Download</button>
+            <div class="progress-container" id="progressContainer" style="display: none;">
+                <div class="progress-label">
+                    <span>PROGRESS</span>
+                    <span id="progressPercent">0%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                    <span class="progress-text" id="progressText">READY</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Completion Message -->
+        <div class="hud-panel" id="completionPanel" style="display: none;">
+            <div class="corner-bl"></div>
+            <div class="corner-br"></div>
+            <div class="completion-message active">
+                <div class="completion-text">DOWNLOAD COMPLETE</div>
+                <p style="color: var(--text-dim); margin-top: 15px; font-size: 0.85rem;">TARGET ACQUIRED SUCCESSFULLY</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const urlInput = document.getElementById('urlInput');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const formatSelect = document.getElementById('formatSelect');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const previewContainer = document.getElementById('previewContainer');
+        const previewStats = document.getElementById('previewStats');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const progressPercent = document.getElementById('progressPercent');
+        const completionPanel = document.getElementById('completionPanel');
+        const celebrationOverlay = document.getElementById('celebrationOverlay');
+
+        // State
+        let analyzedData = null;
+
+        // Analyze Button
+        analyzeBtn.addEventListener('click', async () => {
+            const url = urlInput.value.trim();
+            if (!url) {
+                alert('Please enter a valid URL');
+                return;
+            }
+
+            analyzeBtn.textContent = 'ANALYZING...';
+            analyzeBtn.disabled = true;
+
+            try {
+                // Simulate analysis (in real app, this would call yt-dlp --dump-json)
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                // Mock video data
+                analyzedData = {
+                    title: 'Sample Video',
+                    thumbnail: '',
+                    resolution: '1920x1080',
+                    duration: '12:34',
+                    size: '156 MB',
+                    formats: ['best', 'bestvideo+bestaudio', 'mp4', 'webm']
+                };
+
+                // Update preview
+                previewContainer.innerHTML = `
+                    <div style="color: var(--cyan); font-family: 'Orbitron', sans-serif; font-size: 1.2rem;">
+                        SIGNAL LOCKED
+                    </div>
+                    <p style="color: var(--text-dim); margin-top: 10px; font-size: 0.85rem;">${url.substring(0, 50)}...</p>
+                `;
+
+                // Show stats
+                document.getElementById('videoRes').textContent = analyzedData.resolution;
+                document.getElementById('videoDuration').textContent = analyzedData.duration;
+                document.getElementById('videoSize').textContent = analyzedData.size;
+                previewStats.style.display = 'grid';
+
+                // Enable download button
+                downloadBtn.disabled = false;
+                downloadBtn.textContent = 'INITIALIZE DOWNLOAD';
+
+            } catch (error) {
+                previewContainer.innerHTML = `
+                    <div style="color: var(--danger); font-family: 'Orbitron', sans-serif;">
+                        SIGNAL LOST
+                    </div>
+                    <p style="color: var(--text-dim); margin-top: 10px;">${error.message}</p>
+                `;
+            } finally {
+                analyzeBtn.textContent = 'ANALYZE TARGET';
+                analyzeBtn.disabled = false;
+            }
+        });
+
+        // Download Button
+        downloadBtn.addEventListener('click', async () => {
+            const format = formatSelect.value;
+            if (!format) {
+                alert('Please select a format');
+                return;
+            }
+
+            downloadBtn.disabled = true;
+            downloadBtn.textContent = 'DOWNLOADING...';
+            progressContainer.style.display = 'block';
+            progressText.textContent = 'INITIALIZING';
+
+            // Simulate download progress
+            for (let i = 0; i <= 100; i += 5) {
+                await new Promise(resolve => setTimeout(resolve, 200));
+                progressFill.style.width = i + '%';
+                progressPercent.textContent = i + '%';
+                progressText.textContent = i < 30 ? 'DOWNLOADING...' : i < 70 ? 'PROCESSING...' : 'FINALIZING...';
+            }
+
+            // Show completion
+            progressText.textContent = 'COMPLETE';
+            completionPanel.style.display = 'block';
+            
+            // Trigger celebration
+            triggerCelebration();
+
+            downloadBtn.textContent = 'DOWNLOAD COMPLETE';
+        });
+
+        // Celebration Animation
+        function triggerCelebration() {
+            celebrationOverlay.classList.add('active');
+            
+            // Create particles
+            for (let i = 0; i < 50; i++) {
+                createParticle();
+            }
+
+            setTimeout(() => {
+                celebrationOverlay.classList.remove('active');
+            }, 2000);
+        }
+
+        function createParticle() {
+            const particle = document.createElement('div');
+            particle.className = 'particle';
+            
+            // Random position
+            particle.style.left = Math.random() * 100 + 'vw';
+            particle.style.top = Math.random() * 100 + 'vh';
+            
+            // Random color
+            particle.style.background = Math.random() > 0.5 ? 'var(--cyan)' : 'var(--pink)';
+            particle.style.boxShadow = `0 0 10px ${particle.style.background}`;
+            
+            // Random trajectory
+            const angle = Math.random() * Math.PI * 2;
+            const distance = 100 + Math.random() * 200;
+            particle.style.setProperty('--tx', Math.cos(angle) * distance + 'px');
+            particle.style.setProperty('--ty', Math.sin(angle) * distance + 'px');
+            
+            particle.style.animation = `particleExplode ${0.5 + Math.random() * 0.5}s ease-out forwards`;
+            particle.style.animationDelay = Math.random() * 0.3 + 's';
+            
+            celebrationOverlay.appendChild(particle);
+            
+            setTimeout(() => {
+                particle.remove();
+            }, 2000);
+        }
+    </script>
+</body>
+</html>
