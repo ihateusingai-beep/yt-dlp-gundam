@@ -658,23 +658,62 @@
 
     <script>
         // DOM Elements
-        const urlInput = document.getElementById('urlInput');
-        const analyzeBtn = document.getElementById('analyzeBtn');
-        const formatSelect = document.getElementById('formatSelect');
-        const downloadBtn = document.getElementById('downloadBtn');
+        const urlInput        = document.getElementById('urlInput');
+        const analyzeBtn      = document.getElementById('analyzeBtn');
+        const formatSelect    = document.getElementById('formatSelect');
+        const downloadBtn     = document.getElementById('downloadBtn');
         const previewContainer = document.getElementById('previewContainer');
-        const previewStats = document.getElementById('previewStats');
+        const previewStats    = document.getElementById('previewStats');
         const progressContainer = document.getElementById('progressContainer');
-        const progressFill = document.getElementById('progressFill');
-        const progressText = document.getElementById('progressText');
+        const progressFill    = document.getElementById('progressFill');
+        const progressText    = document.getElementById('progressText');
         const progressPercent = document.getElementById('progressPercent');
         const completionPanel = document.getElementById('completionPanel');
         const celebrationOverlay = document.getElementById('celebrationOverlay');
 
         // State
-        let analyzedData = null;
+        let analyzedData   = null;
+        let activeSource   = null;   // current EventSource
 
-        // Analyze Button
+        // Helpers
+        function setPreview(html) {
+            previewContainer.innerHTML = html;
+        }
+
+        function formatBytes(bytes) {
+            if (!bytes) return 'N/A';
+            const gb = bytes / 1e9;
+            if (gb >= 1) return gb.toFixed(1) + ' GB';
+            return (bytes / 1e6).toFixed(0) + ' MB';
+        }
+
+        function setButtonsState({ analyzing, downloading, canDownload }) {
+            analyzeBtn.disabled   = analyzing || downloading;
+            analyzeBtn.textContent = analyzing ? 'ANALYZING...' : 'ANALYZE TARGET';
+            downloadBtn.disabled  = downloading || !canDownload;
+            downloadBtn.textContent = downloading ? 'DOWNLOADING...' : 'INITIALIZE DOWNLOAD';
+        }
+
+        function resetProgress() {
+            progressFill.style.width    = '0%';
+            progressPercent.textContent = '0%';
+            progressText.textContent    = 'READY';
+            progressContainer.style.display = 'none';
+            completionPanel.style.display   = 'none';
+        }
+
+        function showError(msg) {
+            setPreview(`
+                <div style="color: var(--danger); font-family: 'Orbitron', sans-serif; font-size: 1.2rem;">
+                    SIGNAL LOST
+                </div>
+                <p style="color: var(--text-dim); margin-top: 10px;">${msg}</p>
+            `);
+        }
+
+        // ------------------------------------------------------------------------- //
+        // Analyze
+        // ------------------------------------------------------------------------- //
         analyzeBtn.addEventListener('click', async () => {
             const url = urlInput.value.trim();
             if (!url) {
@@ -682,90 +721,140 @@
                 return;
             }
 
-            analyzeBtn.textContent = 'ANALYZING...';
-            analyzeBtn.disabled = true;
+            resetProgress();
+            setButtonsState({ analyzing: true, downloading: false, canDownload: false });
+            setPreview(`<div style="color: var(--cyan); font-family: 'Orbitron', sans-serif;">SCANNING TARGET...</div>`);
+            analyzedData = null;
 
             try {
-                // Simulate analysis (in real app, this would call yt-dlp --dump-json)
-                await new Promise(resolve => setTimeout(resolve, 1500));
-                
-                // Mock video data
-                analyzedData = {
-                    title: 'Sample Video',
-                    thumbnail: '',
-                    resolution: '1920x1080',
-                    duration: '12:34',
-                    size: '156 MB',
-                    formats: ['best', 'bestvideo+bestaudio', 'mp4', 'webm']
-                };
+                const res  = await fetch(`/api/info?url=${encodeURIComponent(url)}`);
+                const data = await res.json();
 
-                // Update preview
-                previewContainer.innerHTML = `
-                    <div style="color: var(--cyan); font-family: 'Orbitron', sans-serif; font-size: 1.2rem;">
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Analysis failed');
+                }
+
+                analyzedData = data;
+
+                // Thumbnail
+                const thumbHtml = data.thumbnail
+                    ? `<img class="preview-image" src="${data.thumbnail}" alt="thumbnail">`
+                    : '';
+
+                setPreview(`
+                    ${thumbHtml}
+                    <div style="color: var(--cyan); font-family: 'Orbitron', sans-serif; font-size: 1.1rem; margin-top: 12px;">
                         SIGNAL LOCKED
                     </div>
-                    <p style="color: var(--text-dim); margin-top: 10px; font-size: 0.85rem;">${url.substring(0, 50)}...</p>
-                `;
+                    <p style="color: var(--text); margin-top: 6px; font-size: 0.85rem;">${data.title}</p>
+                `);
 
-                // Show stats
-                document.getElementById('videoRes').textContent = analyzedData.resolution;
-                document.getElementById('videoDuration').textContent = analyzedData.duration;
-                document.getElementById('videoSize').textContent = analyzedData.size;
+                // Stats
+                document.getElementById('videoRes').textContent     = data.resolution;
+                document.getElementById('videoDuration').textContent = data.duration;
+                document.getElementById('videoSize').textContent    = formatBytes(data.filesize);
                 previewStats.style.display = 'grid';
 
-                // Enable download button
-                downloadBtn.disabled = false;
-                downloadBtn.textContent = 'INITIALIZE DOWNLOAD';
-
-            } catch (error) {
-                previewContainer.innerHTML = `
-                    <div style="color: var(--danger); font-family: 'Orbitron', sans-serif;">
-                        SIGNAL LOST
-                    </div>
-                    <p style="color: var(--text-dim); margin-top: 10px;">${error.message}</p>
+                // Populate format dropdown with available formats
+                const hasVideo  = data.formats.some(f => f.vcodec !== 'none');
+                const hasAudio  = data.formats.some(f => f.acodec !== 'none' && f.vcodec === 'none');
+                formatSelect.innerHTML = `
+                    <option value="">-- SELECT FORMAT --</option>
+                    <option value="best">Best Quality (Auto)</option>
+                    ${data.formats.some(f => f.ext === 'mp4' && f.vcodec !== 'none')  ? '<option value="mp4">MP4 (Video)</option>' : ''}
+                    ${data.formats.some(f => f.ext === 'webm' && f.vcodec !== 'none') ? '<option value="webm">WebM (Video)</option>' : ''}
+                    ${hasAudio ? '<option value="bestaudio">Audio Only</option>' : ''}
                 `;
-            } finally {
-                analyzeBtn.textContent = 'ANALYZE TARGET';
-                analyzeBtn.disabled = false;
+
+                setButtonsState({ analyzing: false, downloading: false, canDownload: true });
+                downloadBtn.disabled = true;   // force format selection first
+                downloadBtn.textContent = 'SELECT FORMAT & INITIALIZE';
+
+            } catch (err) {
+                showError(err.message);
+                setButtonsState({ analyzing: false, downloading: false, canDownload: false });
             }
         });
 
-        // Download Button
-        downloadBtn.addEventListener('click', async () => {
-            const format = formatSelect.value;
-            if (!format) {
-                alert('Please select a format');
-                return;
+        // ------------------------------------------------------------------------- //
+        // Format select – re-enable download once format chosen
+        // ------------------------------------------------------------------------- //
+        formatSelect.addEventListener('change', () => {
+            downloadBtn.disabled = !analyzedData || !formatSelect.value;
+        });
+
+        // ------------------------------------------------------------------------- //
+        // Download
+        // ------------------------------------------------------------------------- //
+        downloadBtn.addEventListener('click', () => {
+            const url  = urlInput.value.trim();
+            const fmt  = formatSelect.value || 'best';
+            if (!url) return;
+
+            // Close any stale EventSource
+            if (activeSource) {
+                activeSource.close();
+                activeSource = null;
             }
 
-            downloadBtn.disabled = true;
-            downloadBtn.textContent = 'DOWNLOADING...';
+            setButtonsState({ analyzing: false, downloading: true, canDownload: false });
             progressContainer.style.display = 'block';
-            progressText.textContent = 'INITIALIZING';
+            completionPanel.style.display    = 'none';
+            progressText.textContent         = 'INITIALIZING...';
 
-            // Simulate download progress
-            for (let i = 0; i <= 100; i += 5) {
-                await new Promise(resolve => setTimeout(resolve, 200));
-                progressFill.style.width = i + '%';
-                progressPercent.textContent = i + '%';
-                progressText.textContent = i < 30 ? 'DOWNLOADING...' : i < 70 ? 'PROCESSING...' : 'FINALIZING...';
-            }
+            activeSource = new EventSource(
+                `/api/download?url=${encodeURIComponent(url)}&fmt=${encodeURIComponent(fmt)}`
+            );
 
-            // Show completion
-            progressText.textContent = 'COMPLETE';
-            completionPanel.style.display = 'block';
-            
-            // Trigger celebration
-            triggerCelebration();
+            activeSource.onmessage = (e) => {
+                const d = JSON.parse(e.data);
 
-            downloadBtn.textContent = 'DOWNLOAD COMPLETE';
+                if (d.status === 'error') {
+                    activeSource.close();
+                    activeSource = null;
+                    showError(d.error || 'Download error');
+                    setButtonsState({ analyzing: false, downloading: false, canDownload: true });
+                    return;
+                }
+
+                if (d.status === 'finished') {
+                    progressFill.style.width    = '100%';
+                    progressPercent.textContent = '100%';
+                    progressText.textContent    = 'FINALIZING...';
+                }
+
+                if (d.status === 'downloading') {
+                    const pct = Math.min(100, Math.round((d.downloaded_bytes / d.total_bytes) * 100)) || 0;
+                    progressFill.style.width    = pct + '%';
+                    progressPercent.textContent = d._percent_str || pct + '%';
+                    progressText.textContent    = d._speed_str || 'DOWNLOADING...';
+                }
+
+                if (d.status === 'done') {
+                    activeSource.close();
+                    activeSource = null;
+                    progressText.textContent = 'COMPLETE';
+                    progressFill.style.width = '100%';
+                    progressPercent.textContent = '100%';
+                    completionPanel.style.display = 'block';
+                    triggerCelebration();
+                    setButtonsState({ analyzing: false, downloading: false, canDownload: true });
+                    downloadBtn.textContent = 'DOWNLOAD COMPLETE';
+                }
+            };
+
+            activeSource.onerror = () => {
+                activeSource.close();
+                activeSource = null;
+                showError('Connection lost during download');
+                setButtonsState({ analyzing: false, downloading: false, canDownload: true });
+            };
         });
 
         // Celebration Animation
         function triggerCelebration() {
             celebrationOverlay.classList.add('active');
-            
-            // Create particles
+
             for (let i = 0; i < 50; i++) {
                 createParticle();
             }
@@ -778,29 +867,22 @@
         function createParticle() {
             const particle = document.createElement('div');
             particle.className = 'particle';
-            
-            // Random position
+
             particle.style.left = Math.random() * 100 + 'vw';
             particle.style.top = Math.random() * 100 + 'vh';
-            
-            // Random color
             particle.style.background = Math.random() > 0.5 ? 'var(--cyan)' : 'var(--pink)';
-            particle.style.boxShadow = `0 0 10px ${particle.style.background}`;
-            
-            // Random trajectory
-            const angle = Math.random() * Math.PI * 2;
+            particle.style.boxShadow  = `0 0 10px ${particle.style.background}`;
+
+            const angle   = Math.random() * Math.PI * 2;
             const distance = 100 + Math.random() * 200;
             particle.style.setProperty('--tx', Math.cos(angle) * distance + 'px');
             particle.style.setProperty('--ty', Math.sin(angle) * distance + 'px');
-            
-            particle.style.animation = `particleExplode ${0.5 + Math.random() * 0.5}s ease-out forwards`;
-            particle.style.animationDelay = Math.random() * 0.3 + 's';
-            
+            particle.style.animation        = `particleExplode ${0.5 + Math.random() * 0.5}s ease-out forwards`;
+            particle.style.animationDelay   = Math.random() * 0.3 + 's';
+
             celebrationOverlay.appendChild(particle);
-            
-            setTimeout(() => {
-                particle.remove();
-            }, 2000);
+
+            setTimeout(() => { particle.remove(); }, 2000);
         }
     </script>
 </body>
