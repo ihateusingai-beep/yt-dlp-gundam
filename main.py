@@ -16,8 +16,18 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 # --------------------------------------------------------------------------- #
 # Paths
 # --------------------------------------------------------------------------- #
-BASE_DIR   = Path(__file__).parent.resolve()
-DOWNLOADS  = BASE_DIR / "downloads"
+# Frozen (PyInstaller): executable lives in dist/yt_dlp_gundam/yt_dlp_gundam.exe
+# downloads/ goes next to the .exe so users can find their files.
+if getattr(sys, 'frozen', False):
+    # sys.executable is <dist>/yt_dlp_gundam/yt_dlp_gundam.exe
+    APP_DIR   = Path(sys.executable).parent.resolve()
+    TEMPLATES = Path(sys._MEIPASS) / 'templates'
+else:
+    APP_DIR   = Path(__file__).parent.resolve()
+    TEMPLATES = APP_DIR / 'templates'
+
+BASE_DIR   = APP_DIR
+DOWNLOADS  = APP_DIR / 'downloads'
 DOWNLOADS.mkdir(exist_ok=True)
 
 # --------------------------------------------------------------------------- #
@@ -77,7 +87,7 @@ app = FastAPI(title="yt-dlp Gundam Dashboard")
 # --------------------------------------------------------------------------- #
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    html_path = BASE_DIR / "templates" / "index.html"
+    html_path = TEMPLATES / "index.html"
     if html_path.exists():
         return FileResponse(str(html_path))
     return "<html><body><h1>yt-dlp Gundam Dashboard</h1><p>templates/index.html not found.</p></body></html>"
@@ -260,4 +270,10 @@ async def download(url: str, request: Request, fmt: str = "best"):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("__main__:app", host="0.0.0.0", port=port, reload=True)
+    # reload=True only works in dev (non-frozen). Frozen exe must not reload.
+    uvicorn.run(
+        "__main__:app",
+        host="0.0.0.0",
+        port=port,
+        reload=not getattr(sys, "frozen", False),
+    )
