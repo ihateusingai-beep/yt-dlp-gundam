@@ -11,16 +11,21 @@ from pathlib import Path
 
 block_cipher = None
 
+# Resolve at build time — works on Mac, Windows, Linux, and GitHub Actions runners.
+# The workflow calls Set-Location $env:GITHUB_WORKSPACE before pyinstaller,
+# so os.getcwd() gives us the repo root.
+PROJECT_ROOT = Path(os.getcwd()).resolve()
+
 # When frozen (running as .exe), templates live under sys._MEIPASS.
 # Normal dev: templates/ is next to main.py.
 if getattr(sys, 'frozen', False):
     base_path = Path(sys._MEIPASS)
 else:
-    base_path = Path(__file__).parent.resolve()
+    base_path = PROJECT_ROOT
 
 a = Analysis(
-    ['main.py'],
-    pathex=[str(Path(__file__).parent.resolve())],
+    [str(PROJECT_ROOT / 'main.py')],
+    pathex=[str(PROJECT_ROOT)],
     binaries=[
         # Bundle yt-dlp's bundled ffmpeg binary if present
         # (yt-dlp ships a static ffmpeg; PyInstaller will find it automatically
