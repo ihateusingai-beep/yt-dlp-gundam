@@ -45,6 +45,25 @@ jobs:
           Write-Host "PyInstaller version:"
           pyinstaller --version
 
+      - name: Download FFmpeg for bundling
+        run: |
+          Write-Host "Downloading FFmpeg essentials build..."
+          $ErrorActionPreference = 'Stop'
+          $ffmpegUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          $zipPath = "ffmpeg-build.zip"
+          curl.exe -L -o $zipPath $ffmpegUrl --max-time 300
+          if (-not (Test-Path $zipPath)) { throw "FFmpeg zip not downloaded" }
+          $size = (Get-Item $zipPath).Length
+          Write-Host "Downloaded $size bytes"
+          if ($size -lt 100000000) { throw "FFmpeg zip too small ($size bytes), download may have failed" }
+          Expand-Archive -Path $zipPath -DestinationPath vendor -Force
+          $ffmpegExe = Get-ChildItem -Path vendor -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          if (-not $ffmpegExe) { throw "ffmpeg.exe not found in extracted zip" }
+          Write-Host "Found ffmpeg: $($ffmpegExe.FullName) ($($ffmpegExe.Length) bytes)"
+          # Copy to predictable path
+          Copy-Item $ffmpegExe.FullName -Destination "vendor/ffmpeg.exe" -Force
+          Write-Host "Bundled at: $(Resolve-Path vendor/ffmpeg.exe)"
+
       - name: Build with PyInstaller
         run: |
           Write-Host "CWD before pyinstaller: $(Get-Location)"

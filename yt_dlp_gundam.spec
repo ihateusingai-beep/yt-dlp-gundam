@@ -22,30 +22,37 @@ if getattr(sys, 'frozen', False):
 else:
     base_path = PROJECT_ROOT
 
-# Locate imageio-ffmpeg binary on the build host (Windows runner or local).
-# We bundle it so the .exe works without a system FFmpeg install.
-# imageio-ffmpeg downloads the binary on first call to get_ffmpeg_exe().
-# Run a subprocess to force-download the binary, then locate it.
+# Locate FFmpeg binary. Two sources are supported:
+#   1. CI workflow: pre-downloaded to vendor/ffmpeg.exe (BtbN/gyan.dev build)
+#   2. Local dev: imageio-ffmpeg package (Mac) or system PATH (Windows)
+# We try them in order and bundle whichever we find.
 import subprocess
 _extra_binaries = []
-try:
-    # Force-download by calling get_ffmpeg_exe in a subprocess (which
-    # triggers imageio's lazy download to %LOCALAPPDATA% on Windows).
-    proc = subprocess.run(
-        [sys.executable, "-c",
-         "import imageio_ffmpeg, os; p = imageio_ffmpeg.get_ffmpeg_exe();"
-         "print(p); import sys; sys.exit(0 if os.path.exists(p) and os.path.getsize(p) > 1000000 else 1)"],
-        capture_output=True, text=True, timeout=120,
-    )
-    if proc.returncode == 0:
-        ffmpeg_path = proc.stdout.strip().splitlines()[-1]
-        # PyInstaller binaries format: list of (src, dst_dir) tuples
-        _extra_binaries.append((ffmpeg_path, 'imageio_ffmpeg'))
-        print(f"[spec] Bundling FFmpeg binary ({Path(ffmpeg_path).stat().st_size // 1024 // 1024}MB): {ffmpeg_path}")
-    else:
-        print(f"[spec] FFmpeg download failed: {proc.stderr.strip()}")
-except Exception as e:
-    print(f"[spec] imageio-ffmpeg setup error: {e}")
+_candidate_ffmpeg = None
+
+# 1. CI-supplied pre-downloaded binary
+vendor_ffmpeg = PROJECT_ROOT / 'vendor' / 'ffmpeg.exe'
+if vendor_ffmpeg.exists() and vendor_ffmpeg.stat().st_size > 1_000_000:
+    _candidate_ffmpeg = str(vendor_ffmpeg)
+    print(f"[spec] Using pre-downloaded FFmpeg: {_candidate_ffmpeg} ({vendor_ffmpeg.stat().st_size // 1024 // 1024}MB)")
+
+# 2. imageio-ffmpeg (try to force-download via subprocess)
+if not _candidate_ffmpeg:
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c",
+             "import imageio_ffmpeg, os; p = imageio_ffmpeg.get_ffmpeg_exe();"
+             "print(p); import sys; sys.exit(0 if os.path.exists(p) and os.path.getsize(p) > 1000000 else 1)"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if proc.returncode == 0:
+            _candidate_ffmpeg = proc.stdout.strip().splitlines()[-1]
+            print(f"[spec] Using imageio-ffmpeg: {_candidate_ffmpeg}")
+    except Exception as e:
+        print(f"[spec] imageio-ffmpeg unavailable: {e}")
+
+if _candidate_ffmpeg:
+    _extra_binaries.append((_candidate_ffmpeg, '.'))
 
 # Icon for the .exe (Windows shows this in Taskbar / File Explorer)
 ICON_PATH = PROJECT_ROOT / 'ntd_icon.ico'
