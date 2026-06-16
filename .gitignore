@@ -8,3 +8,7 @@ env/
 *.egg
 downloads/*
 !downloads/.gitkeep
+build/
+dist/
+.DS_Store
+*.zip

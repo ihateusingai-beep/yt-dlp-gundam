@@ -33,14 +33,23 @@ DOWNLOADS  = APP_DIR / 'downloads'
 DOWNLOADS.mkdir(exist_ok=True)
 
 # --------------------------------------------------------------------------- #
-# FFmpeg detection
+# FFmpeg detection — check system PATH first, then bundled (imageio-ffmpeg)
 # --------------------------------------------------------------------------- #
 def find_ffmpeg() -> str | None:
     """Return the path to ffmpeg, or None if not found."""
+    # 1. System PATH
     path = shutil.which("ffmpeg")
     if path:
         return path
-    # Windows fallback – search common install locations
+    # 2. Bundled ffmpeg from imageio-ffmpeg (PyInstaller bundles this)
+    try:
+        import imageio_ffmpeg
+        bundled = imageio_ffmpeg.get_ffmpeg_exe()
+        if bundled and Path(bundled).exists():
+            return bundled
+    except ImportError:
+        pass
+    # 3. Windows fallback – search common install locations
     for candidate in [
         Path("C:/ffmpeg/bin/ffmpeg.exe"),
         Path("C:/Program Files/ffmpeg/bin/ffmpeg.exe"),
@@ -99,10 +108,21 @@ async def index():
 # --------------------------------------------------------------------------- #
 @app.get("/api/health")
 async def health():
+    # Identify ffmpeg source for the user
+    ffmpeg_source = "missing"
+    if FFMPEG_PATH:
+        try:
+            if "imageio" in FFMPEG_PATH.lower() or "site-packages" in FFMPEG_PATH:
+                ffmpeg_source = "bundled"
+            else:
+                ffmpeg_source = "system"
+        except Exception:
+            ffmpeg_source = "unknown"
     return {
         "status": "ok",
         "ffmpeg": {
             "path": FFMPEG_PATH,
+            "source": ffmpeg_source,
             "version": get_ffmpeg_version(),
         },
         "python": sys.version,
@@ -456,11 +476,58 @@ async def tag_file(req: TagRequest):
 
 if __name__ == "__main__":
     import uvicorn
+    import threading
+    import time
     port = int(os.environ.get("PORT", 8000))
+    is_frozen = getattr(sys, "frozen", False)
+
+    def open_browser_when_ready(url: str, delay: float = 1.5):
+        """Wait for uvicorn to bind, then open the dashboard in the user's
+        default browser. Daemon thread so it doesn't block process exit."""
+        time.sleep(delay)
+        try:
+            import webbrowser
+            webbrowser.open(url)
+        except Exception as e:
+            print(f"[health] Could not auto-open browser: {e}")
+
+    if is_frozen:
+        # Frozen exe: auto-open browser after server starts
+        threading.Thread(
+            target=open_browser_when_ready,
+            args=(f"http://localhost:{port}",),
+            daemon=True,
+        ).start()
+
+        # Frozen exe: also start a system tray icon so the user can quit
+        # the server cleanly without Task Manager.
+        try:
+            from tray import run_tray
+            stop_event = threading.Event()
+            tray_thread = threading.Thread(
+                target=run_tray,
+                args=(port, stop_event),
+                daemon=True,
+            )
+            tray_thread.start()
+        except Exception as e:
+            print(f"[health] Could not start tray: {e}")
+            stop_event = None
+    else:
+        stop_event = None
+
     # reload=True only works in dev (non-frozen). Frozen exe must not reload.
-    uvicorn.run(
-        "__main__:app",
-        host="0.0.0.0",
-        port=port,
-        reload=not getattr(sys, "frozen", False),
-    )
+    try:
+        uvicorn.run(
+            "__main__:app",
+            host="0.0.0.0",
+            port=port,
+            reload=not is_frozen,
+        )
+    except KeyboardInterrupt:
+        pass
+    finally:
+        # When uvicorn exits (e.g. tray "Quit" caused the loop to end),
+        # signal the tray thread to stop so the process can exit cleanly.
+        if stop_event is not None:
+            stop_event.set()
