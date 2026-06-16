@@ -2,6 +2,26 @@
 
 Gundam NT-D cockpit-style video downloader. Download YouTube/videos without command line.
 
+**Current version: 0.7.0** — see [`__version__` in `main.py`](./main.py) for the latest.
+
+## Versioning
+
+This project follows [SemVer](https://semver.org/):
+
+- **MAJOR** — breaking UX change (e.g. removed feature, new required tool)
+- **MINOR** — new feature (e.g. new format option, new panel)
+- **PATCH** — bug fix or polish
+
+To ship a new version:
+1. Bump `__version__` in `main.py` (e.g. `0.7.0` → `0.7.1`)
+2. Commit with a `[bump]` tag or just normal commit
+3. Push — CI auto-builds and stamps the version into:
+   - Artifact name (`yt-dlp-gundam-v0.7.1-win64`)
+   - Windows `.exe` metadata
+   - Dashboard header (live)
+   - `/api/health` response
+4. Optional: trigger workflow with `tag=v0.7.1` to publish a GitHub Release
+
 ## Features
 
 - 🎯 URL input → video preview (title, thumbnail, duration)

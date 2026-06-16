@@ -16,6 +16,16 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 # --------------------------------------------------------------------------- #
+# Versioning
+# --------------------------------------------------------------------------- #
+# Bump this every time you ship a meaningful change. SemVer:
+#   MAJOR — breaking UX change
+#   MINOR — new feature
+#   PATCH — bug fix / polish
+# The CI workflow reads this and stamps it onto artifact + exe metadata.
+__version__ = "0.7.0"
+
+# --------------------------------------------------------------------------- #
 # Paths
 # --------------------------------------------------------------------------- #
 # Frozen (PyInstaller): executable lives in dist/yt_dlp_gundam/yt_dlp_gundam.exe
@@ -64,7 +74,7 @@ FFMPEG_PATH = find_ffmpeg()
 # --------------------------------------------------------------------------- #
 # FastAPI app
 # --------------------------------------------------------------------------- #
-app = FastAPI(title="yt-dlp Gundam Dashboard")
+app = FastAPI(title="yt-dlp Gundam Dashboard", version=__version__)
 
 # Per-host download lock so we can't have two downloads racing.
 download_lock = asyncio.Lock()
@@ -91,7 +101,7 @@ print(f"[health] FFmpeg {'found: ' + FFMPEG_PATH + ' (' + get_ffmpeg_version() +
 # --------------------------------------------------------------------------- #
 # FastAPI app
 # --------------------------------------------------------------------------- #
-app = FastAPI(title="yt-dlp Gundam Dashboard")
+app = FastAPI(title="yt-dlp Gundam Dashboard", version=__version__)
 
 # --------------------------------------------------------------------------- #
 # Static / HTML
@@ -120,6 +130,7 @@ async def health():
             ffmpeg_source = "unknown"
     return {
         "status": "ok",
+        "version": __version__,
         "ffmpeg": {
             "path": FFMPEG_PATH,
             "source": ffmpeg_source,

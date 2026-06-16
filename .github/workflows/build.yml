@@ -92,18 +92,28 @@ jobs:
             Write-Host "build/ does not exist"
           }
 
+      - name: Extract version from main.py
+        id: version
+        run: |
+          $version = (Select-String -Path main.py -Pattern '^__version__ = "([^"]+)"' -AllMatches).Matches.Groups[1].Value
+          if (-not $version) { throw "Could not find __version__ in main.py" }
+          Write-Host "Detected version: $version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "short_sha=$env:GITHUB_SHA" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
       - name: Upload artifacts
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: yt-dlp-gundam-win64
+          name: yt-dlp-gundam-v${{ steps.version.outputs.version }}-win64
           path: dist/yt_dlp_gundam/
           retention-days: 30
 
       - name: Create zip for release
         if: github.event.inputs.tag != ''
         run: |
-          Compress-Archive -Path "dist\yt_dlp_gundam" -DestinationPath "yt_dlp_gundam-win64.zip" -Force
+          $version = (Select-String -Path main.py -Pattern '^__version__ = "([^"]+)"' -AllMatches).Matches.Groups[1].Value
+          Compress-Archive -Path "dist\yt_dlp_gundam" -DestinationPath "yt_dlp_gundam-v$version-win64.zip" -Force
         working-directory: ${{ github.workspace }}
 
       - name: Upload zip to release
@@ -114,6 +124,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
-          name: ${{ env.TAG }} — yt-dlp Gundam Dashboard
-          files: yt_dlp_gundam-win64.zip
+          name: ${{ env.TAG }} — yt-dlp Gundam Dashboard v${{ steps.version.outputs.version }}
+          files: yt_dlp_gundam-v${{ steps.version.outputs.version }}-win64.zip
           draft: true

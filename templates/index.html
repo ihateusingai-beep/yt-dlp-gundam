@@ -563,6 +563,9 @@
                 <span class="ntd-dot"></span>
                 <span class="ntd-text">NT-D ACTIVE</span>
             </div>
+            <div id="versionBadge" style="margin-top: 8px; font-size: 0.7rem; color: var(--text-dim); letter-spacing: 2px;">
+                v0.0.0
+            </div>
         </header>
 
         <!-- Energy Bar -->
@@ -1068,6 +1071,19 @@
 
         // Initial load + refresh after every download
         loadFiles();
+
+        // Display server version in header
+        (async () => {
+            try {
+                const r = await fetch('/api/health');
+                const data = await r.json();
+                if (data.version) {
+                    document.getElementById('versionBadge').textContent = 'v' + data.version;
+                }
+            } catch (e) {
+                // Server not reachable, leave default
+            }
+        })();
     </script>
 </body>
 </html>

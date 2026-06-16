@@ -15,6 +15,19 @@ block_cipher = None
 # `Set-Location $env:GITHUB_WORKSPACE` before pyinstaller, so cwd = repo root.
 PROJECT_ROOT = Path('.').resolve()
 
+# Read __version__ from main.py so the built exe and CI artifact always
+# carry the same version string as the runtime health endpoint.
+__app_version__ = "0.0.0"
+try:
+    _main_src = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
+    import re as _re
+    _m = _re.search(r'^__version__\s*=\s*"([^"]+)"', _main_src, _re.MULTILINE)
+    if _m:
+        __app_version__ = _m.group(1)
+        print(f"[spec] Detected app version: {__app_version__}")
+except Exception as _e:
+    print(f"[spec] Could not read __version__ from main.py: {_e}")
+
 # When frozen (running as .exe), templates live under sys._MEIPASS.
 # Normal dev: templates/ is next to main.py.
 if getattr(sys, 'frozen', False):
@@ -130,6 +143,9 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=str(ICON_PATH) if ICON_PATH.exists() else None,
+    # Inject version into the Windows .exe resource. The tuple is required
+    # by PyInstaller and gets baked into the binary's metadata.
+    version=__app_version__ if sys.platform == "win32" else None,
 )
 
 coll = COLLECT(
