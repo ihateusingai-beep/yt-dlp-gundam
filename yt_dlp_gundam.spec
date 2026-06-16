@@ -24,13 +24,25 @@ else:
 
 # Locate imageio-ffmpeg binary on the build host (Windows runner or local).
 # We bundle it so the .exe works without a system FFmpeg install.
+# imageio-ffmpeg downloads the binary on first call to get_ffmpeg_exe(),
+# but only when imported in a normal Python (not from the spec context).
+# Run a subprocess to force-download the binary, then locate it.
+import subprocess
+BUNDLED_FFMPEG_BIN = None
 try:
+    subprocess.check_call(
+        [sys.executable, "-c", "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"],
+        stdout=subprocess.DEVNULL,  # suppress, we'll find it again below
+    )
     import imageio_ffmpeg
     BUNDLED_FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
-    BUNDLED_FFMPEG_BIN = (str(Path(BUNDLED_FFMPEG)), 'imageio_ffmpeg')
-except Exception:
-    BUNDLED_FFMPEG = None
-    BUNDLED_FFMPEG_BIN = None
+    if BUNDLED_FFMPEG and Path(BUNDLED_FFMPEG).exists():
+        BUNDLED_FFMPEG_BIN = (str(Path(BUNDLED_FFMPEG)), 'imageio_ffmpeg')
+        print(f"[spec] Bundling FFmpeg: {BUNDLED_FFMPEG}")
+    else:
+        print("[spec] imageio-ffmpeg binary not found, will rely on system FFmpeg")
+except Exception as e:
+    print(f"[spec] imageio-ffmpeg not available: {e}")
 
 # Icon for the .exe (Windows shows this in Taskbar / File Explorer)
 ICON_PATH = PROJECT_ROOT / 'ntd_icon.ico'
