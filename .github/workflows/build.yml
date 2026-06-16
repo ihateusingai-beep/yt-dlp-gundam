@@ -49,9 +49,13 @@ jobs:
         run: |
           Write-Host "CWD before pyinstaller: $(Get-Location)"
           Write-Host "imageio-ffmpeg binary path:"
-          python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
-          pyinstaller yt_dlp_gundam.spec --noconfirm 2>&1
+          python -c "import imageio_ffmpeg; p = imageio_ffmpeg.get_ffmpeg_exe(); import os; print('PATH:', p); print('EXISTS:', os.path.exists(p)); print('SIZE:', os.path.getsize(p) if os.path.exists(p) else 0)"
+          pyinstaller yt_dlp_gundam.spec --noconfirm 2>&1 | Tee-Object -FilePath pyinstaller.log
           Write-Host "Exit code: $LASTEXITCODE"
+          Write-Host "=== Last 30 lines of spec log ==="
+          if (Test-Path pyinstaller.log) {
+            Get-Content pyinstaller.log -Tail 30
+          }
 
       - name: Check build output
         if: always()
