@@ -80,10 +80,19 @@ Access the dashboard from any device on your Tailscale network (including your W
 
 Build a standalone Windows executable — no Python installation needed on the target PC.
 
-### Prerequisites
+### Option 1: Download from GitHub Actions (recommended)
+
+Every push to `main` automatically builds the .exe via GitHub Actions.
+
+1. Go to [Actions](https://github.com/ihateusingai-beep/yt-dlp-gundam/actions)
+2. Open the latest green ✅ `Build Windows Portable .exe` run
+3. Under **Artifacts**, click `yt-dlp-gundam-win64` → Download
+4. Extract the zip → `yt_dlp_gundam/` folder contains `yt_dlp_gundam.exe`
+
+### Option 2: Build locally
 
 ```powershell
-pip install pyinstaller yt-dlp
+pip install pyinstaller yt-dlp fastapi uvicorn
 ```
 
 ### Build
