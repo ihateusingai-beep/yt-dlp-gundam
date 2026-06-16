@@ -28,6 +28,15 @@ try:
 except Exception as _e:
     print(f"[spec] Could not read __version__ from main.py: {_e}")
 
+# Path to the version resource file (PyInstaller syntax). Bump this file
+# in lockstep with __version__ in main.py.
+_version_txt = str(PROJECT_ROOT / "version_info.txt")
+if (PROJECT_ROOT / "version_info.txt").exists():
+    print(f"[spec] Using version info file: {_version_txt}")
+else:
+    _version_txt = None
+    print("[spec] version_info.txt not found — exe metadata will lack version")
+
 # When frozen (running as .exe), templates live under sys._MEIPASS.
 # Normal dev: templates/ is next to main.py.
 if getattr(sys, 'frozen', False):
@@ -143,9 +152,9 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=str(ICON_PATH) if ICON_PATH.exists() else None,
-    # Inject version into the Windows .exe resource. The tuple is required
-    # by PyInstaller and gets baked into the binary's metadata.
-    version=__app_version__ if sys.platform == "win32" else None,
+    # Inject version into the Windows .exe resource. PyInstaller expects
+    # a path to a version resource file generated above.
+    version=_version_txt,
 )
 
 coll = COLLECT(
