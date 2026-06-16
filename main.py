@@ -302,6 +302,43 @@ async def download(url: str, request: Request, fmt: str = "best"):
     )
 
 
+# --------------------------------------------------------------------------- #
+# /api/files – list downloaded files
+# --------------------------------------------------------------------------- #
+@app.get("/api/files")
+async def list_files():
+    files = []
+    for p in sorted(DOWNLOADS.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+        if p.is_file() and not p.name.startswith('.'):
+            stat = p.stat()
+            files.append({
+                "name":     p.name,
+                "size":     stat.st_size,
+                "modified": stat.st_mtime,
+            })
+    return {"files": files, "downloads_dir": str(DOWNLOADS)}
+
+
+# --------------------------------------------------------------------------- #
+# /api/files/{name} – download a specific file
+# --------------------------------------------------------------------------- #
+@app.get("/api/files/{filename}")
+async def get_file(filename: str):
+    # Reject path traversal: no slashes, no parent refs
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    file_path = DOWNLOADS / filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(
+        str(file_path),
+        filename=filename,
+        media_type="application/octet-stream",
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
