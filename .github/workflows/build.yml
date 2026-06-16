@@ -48,6 +48,8 @@ jobs:
       - name: Build with PyInstaller
         run: |
           Write-Host "CWD before pyinstaller: $(Get-Location)"
+          Write-Host "imageio-ffmpeg binary path:"
+          python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
           pyinstaller yt_dlp_gundam.spec --noconfirm 2>&1
           Write-Host "Exit code: $LASTEXITCODE"
 
