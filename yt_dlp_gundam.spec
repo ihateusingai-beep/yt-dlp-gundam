@@ -11,10 +11,9 @@ from pathlib import Path
 
 block_cipher = None
 
-# Resolve at build time — works on Mac, Windows, Linux, and GitHub Actions runners.
-# The workflow calls Set-Location $env:GITHUB_WORKSPACE before pyinstaller,
-# so os.getcwd() gives us the repo root.
-PROJECT_ROOT = Path(os.getcwd()).resolve()
+# Use current working directory. The GitHub Actions workflow runs
+# `Set-Location $env:GITHUB_WORKSPACE` before pyinstaller, so cwd = repo root.
+PROJECT_ROOT = Path('.').resolve()
 
 # When frozen (running as .exe), templates live under sys._MEIPASS.
 # Normal dev: templates/ is next to main.py.

@@ -31,9 +31,8 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          # $GITHUB_WORKSPACE is the repo root on the runner
-          Set-Location $env:GITHUB_WORKSPACE
           pyinstaller yt_dlp_gundam.spec --noconfirm
+        working-directory: ${{ github.workspace }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -45,8 +44,8 @@ jobs:
       - name: Create zip for release
         if: github.event.inputs.tag != ''
         run: |
-          Set-Location $env:GITHUB_WORKSPACE
           Compress-Archive -Path "dist\yt_dlp_gundam" -DestinationPath "yt_dlp_gundam-win64.zip" -Force
+        working-directory: ${{ github.workspace }}
 
       - name: Upload zip to release
         if: github.event.inputs.tag != ''
