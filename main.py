@@ -216,6 +216,10 @@ async def download(url: str, request: Request, fmt: str = "best"):
 
     queue: asyncio.Queue[dict] = asyncio.Queue()
 
+    # Capture the running event loop NOW (on the async side) so the worker
+    # thread (which has no event loop of its own) can use call_soon_threadsafe.
+    main_loop = asyncio.get_running_loop()
+
     def make_hook(q: asyncio.Queue[dict]):
         def hook(d: dict):
             out = {
@@ -231,10 +235,9 @@ async def download(url: str, request: Request, fmt: str = "best"):
                 "_speed_str":        d.get("_speed_str", ""),
                 "_eta_str":          d.get("_eta_str", ""),
             }
-            # Thread-safe: queue is owned by the async loop thread.
-            # run_in_executor gives us a plain thread, so use call_soon_threadsafe.
-            loop = asyncio.get_event_loop()
-            loop.call_soon_threadsafe(q.put_nowait, out)
+            # Closure-captured loop (not asyncio.get_event_loop) avoids
+            # RuntimeError in worker threads on Python 3.10+.
+            main_loop.call_soon_threadsafe(q.put_nowait, out)
         return hook
 
     # Map frontend "best" / "mp4" / "webm" / etc. to yt-dlp format strings.
@@ -261,19 +264,24 @@ async def download(url: str, request: Request, fmt: str = "best"):
             if FFMPEG_PATH:
                 ydl_opts["ffmpeg_location"] = FFMPEG_PATH
 
+            # main_loop was captured up top (closure for make_hook). Reuse it
+            # here to avoid a second asyncio.get_running_loop() call.
             def do_download():
                 try:
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         ydl.download([url])
                 except Exception as e:
-                    loop = asyncio.get_event_loop()
-                    loop.call_soon_threadsafe(queue.put_nowait, {"status": "error", "error": str(e)})
+                    main_loop.call_soon_threadsafe(
+                        queue.put_nowait,
+                        {"status": "error", "error": str(e)},
+                    )
                 finally:
-                    loop = asyncio.get_event_loop()
-                    loop.call_soon_threadsafe(queue.put_nowait, {"status": "done"})
+                    main_loop.call_soon_threadsafe(
+                        queue.put_nowait,
+                        {"status": "done"},
+                    )
 
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, do_download)
+            await main_loop.run_in_executor(None, do_download)
 
             while True:
                 if await request.is_disconnected():
