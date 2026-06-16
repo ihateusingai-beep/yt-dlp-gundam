@@ -24,25 +24,28 @@ else:
 
 # Locate imageio-ffmpeg binary on the build host (Windows runner or local).
 # We bundle it so the .exe works without a system FFmpeg install.
-# imageio-ffmpeg downloads the binary on first call to get_ffmpeg_exe(),
-# but only when imported in a normal Python (not from the spec context).
+# imageio-ffmpeg downloads the binary on first call to get_ffmpeg_exe().
 # Run a subprocess to force-download the binary, then locate it.
 import subprocess
-BUNDLED_FFMPEG_BIN = None
+_extra_binaries = []
 try:
-    subprocess.check_call(
-        [sys.executable, "-c", "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"],
-        stdout=subprocess.DEVNULL,  # suppress, we'll find it again below
+    # Force-download by calling get_ffmpeg_exe in a subprocess (which
+    # triggers imageio's lazy download to %LOCALAPPDATA% on Windows).
+    proc = subprocess.run(
+        [sys.executable, "-c",
+         "import imageio_ffmpeg, os; p = imageio_ffmpeg.get_ffmpeg_exe();"
+         "print(p); import sys; sys.exit(0 if os.path.exists(p) and os.path.getsize(p) > 1000000 else 1)"],
+        capture_output=True, text=True, timeout=120,
     )
-    import imageio_ffmpeg
-    BUNDLED_FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
-    if BUNDLED_FFMPEG and Path(BUNDLED_FFMPEG).exists():
-        BUNDLED_FFMPEG_BIN = (str(Path(BUNDLED_FFMPEG)), 'imageio_ffmpeg')
-        print(f"[spec] Bundling FFmpeg: {BUNDLED_FFMPEG}")
+    if proc.returncode == 0:
+        ffmpeg_path = proc.stdout.strip().splitlines()[-1]
+        # PyInstaller binaries format: list of (src, dst_dir) tuples
+        _extra_binaries.append((ffmpeg_path, 'imageio_ffmpeg'))
+        print(f"[spec] Bundling FFmpeg binary ({Path(ffmpeg_path).stat().st_size // 1024 // 1024}MB): {ffmpeg_path}")
     else:
-        print("[spec] imageio-ffmpeg binary not found, will rely on system FFmpeg")
+        print(f"[spec] FFmpeg download failed: {proc.stderr.strip()}")
 except Exception as e:
-    print(f"[spec] imageio-ffmpeg not available: {e}")
+    print(f"[spec] imageio-ffmpeg setup error: {e}")
 
 # Icon for the .exe (Windows shows this in Taskbar / File Explorer)
 ICON_PATH = PROJECT_ROOT / 'ntd_icon.ico'
@@ -50,10 +53,7 @@ ICON_PATH = PROJECT_ROOT / 'ntd_icon.ico'
 a = Analysis(
     [str(PROJECT_ROOT / 'main.py')],
     pathex=[str(PROJECT_ROOT)],
-    binaries=[
-        # Bundle imageio-ffmpeg's static ffmpeg binary if available
-        BUNDLED_FFMPEG_BIN,
-    ] if BUNDLED_FFMPEG_BIN else [],
+    binaries=_extra_binaries,
     datas=[
         # Include templates/ as a data directory.
         # In frozen mode, main.py references BASE_DIR / "templates" / "index.html"
