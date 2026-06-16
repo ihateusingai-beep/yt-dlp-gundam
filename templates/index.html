@@ -653,6 +653,21 @@
                 <div class="completion-text">DOWNLOAD COMPLETE</div>
                 <p style="color: var(--text-dim); margin-top: 15px; font-size: 0.85rem;">TARGET ACQUIRED SUCCESSFULLY</p>
                 <div id="downloadLink" style="margin-top: 20px;"></div>
+                <div id="tagForm" style="margin-top: 25px; display: none;">
+                    <h3 class="panel-title" style="margin-bottom: 15px;">// AUTO-TAG METADATA</h3>
+                    <div class="input-group" style="margin-bottom: 10px;">
+                        <input type="text" class="input-field" id="tagArtist" placeholder="Artist" style="padding: 10px; font-size: 0.9rem;">
+                    </div>
+                    <div class="input-group" style="margin-bottom: 10px;">
+                        <input type="text" class="input-field" id="tagAlbum" placeholder="Album" style="padding: 10px; font-size: 0.9rem;">
+                    </div>
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                        <input type="text" class="input-field" id="tagYear" placeholder="Year" style="padding: 10px; font-size: 0.9rem; flex: 1;">
+                        <input type="text" class="input-field" id="tagGenre" placeholder="Genre" style="padding: 10px; font-size: 0.9rem; flex: 2;">
+                    </div>
+                    <button class="btn" id="applyTagBtn" style="padding: 10px 20px; font-size: 0.85rem;">APPLY TAGS</button>
+                    <div id="tagStatus" style="color: var(--text-dim); margin-top: 10px; font-size: 0.8rem;"></div>
+                </div>
             </div>
         </div>
 
@@ -685,6 +700,7 @@
         // State
         let analyzedData   = null;
         let activeSource   = null;   // current EventSource
+        let lastDownloadFilename = null;  // most recently completed file
 
         // Helpers
         function setPreview(html) {
@@ -858,7 +874,9 @@
                     progressPercent.textContent = '100%';
                     completionPanel.style.display = 'block';
                     // Pull filename from latest progress event so we can link to it
-                    const lastFilename = d.filename || '';
+                    // yt-dlp reports the path; grab just the basename.
+                    const lastFilename = (d.filename || '').split(/[\\/]/).pop();
+                    lastDownloadFilename = lastFilename || null;
                     showDownloadLink(lastFilename);
                     triggerCelebration();
                     setButtonsState({ analyzing: false, downloading: false, canDownload: true });
@@ -942,8 +960,11 @@
 
         function showDownloadLink(filename) {
             const link = document.getElementById('downloadLink');
+            const form = document.getElementById('tagForm');
+            const status = document.getElementById('tagStatus');
             if (!filename) {
                 link.innerHTML = '';
+                if (form) form.style.display = 'none';
                 return;
             }
             const safe = filename.replace(/[<>"&]/g, c => ({ '<': '&lt;', '>': '&gt;', '"': '&quot;', '&': '&amp;' }[c]));
@@ -951,7 +972,60 @@
                 <a class="btn" style="display: inline-block; text-decoration: none;" href="/api/files/${encodeURIComponent(filename)}" download>💾 SAVE TO MY DEVICE</a>
                 <div style="color: var(--text-dim); margin-top: 10px; font-size: 0.8rem; word-break: break-all;">${safe}</div>
             `;
+            // Show tag form only for audio files
+            if (form) {
+                const isAudio = /\.(mp3|m4a|flac|ogg)$/i.test(filename);
+                form.style.display = isAudio ? 'block' : 'none';
+                if (isAudio) {
+                    document.getElementById('tagArtist').value = '';
+                    document.getElementById('tagAlbum').value  = '';
+                    document.getElementById('tagYear').value   = '';
+                    document.getElementById('tagGenre').value  = '';
+                    if (status) status.textContent = '';
+                }
+            }
         }
+
+        // ------------------------------------------------------------------------- //
+        // Apply ID3 tags
+        // ------------------------------------------------------------------------- //
+        document.getElementById('applyTagBtn').addEventListener('click', async () => {
+            const filename = lastDownloadFilename;
+            if (!filename) return;
+
+            const payload = {
+                filename,
+                artist: document.getElementById('tagArtist').value.trim() || undefined,
+                album:  document.getElementById('tagAlbum').value.trim()  || undefined,
+                year:   document.getElementById('tagYear').value.trim()   || undefined,
+                genre:  document.getElementById('tagGenre').value.trim()  || undefined,
+            };
+
+            const btn = document.getElementById('applyTagBtn');
+            const status = document.getElementById('tagStatus');
+            btn.disabled = true;
+            btn.textContent = 'APPLYING...';
+            status.textContent = '';
+
+            try {
+                const r = await fetch('/api/tag', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.detail || 'Tagging failed');
+                status.style.color = 'var(--success)';
+                status.textContent = '✓ Tags applied: ' + Object.keys(data.tags).join(', ');
+                loadFiles();  // refresh list (mtime changed)
+            } catch (err) {
+                status.style.color = 'var(--danger)';
+                status.textContent = '✗ ' + sanitizeMsg(err.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'APPLY TAGS';
+            }
+        });
 
         // Initial load + refresh after every download
         loadFiles();

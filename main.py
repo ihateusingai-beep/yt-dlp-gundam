@@ -13,6 +13,7 @@ from pathlib import Path
 import yt_dlp
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from pydantic import BaseModel
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -350,6 +351,70 @@ async def get_file(filename: str):
         filename=filename,
         media_type="application/octet-stream",
     )
+
+
+# --------------------------------------------------------------------------- #
+# /api/tag – write ID3 metadata to an MP3
+# --------------------------------------------------------------------------- #
+class TagRequest(BaseModel):
+    filename: str
+    title:    str | None = None
+    artist:   str | None = None
+    album:    str | None = None
+    year:     str | None = None
+    genre:    str | None = None
+
+
+@app.post("/api/tag")
+async def tag_file(req: TagRequest):
+    if not req.filename:
+        raise HTTPException(status_code=400, detail="filename is required")
+    if "/" in req.filename or "\\" in req.filename or ".." in req.filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    file_path = DOWNLOADS / req.filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if file_path.suffix.lower() not in (".mp3", ".m4a", ".flac", ".ogg"):
+        raise HTTPException(
+            status_code=415,
+            detail=f"Tagging not supported for {file_path.suffix} (use .mp3 / .m4a / .flac / .ogg)",
+        )
+
+    try:
+        from mutagen.id3 import ID3, ID3NoHeaderError, TIT2, TPE1, TALB, TDRC, TCON
+        from mutagen.mp3 import MP3
+        from mutagen import File as MutagenFile
+    except ImportError:
+        raise HTTPException(status_code=500, detail="mutagen not installed")
+
+    try:
+        try:
+            audio = ID3(str(file_path))
+        except ID3NoHeaderError:
+            audio = ID3()  # start fresh
+
+        if req.title:  audio.delall("TIT2"); audio.add(TIT2(encoding=3, text=[req.title]))
+        if req.artist: audio.delall("TPE1"); audio.add(TPE1(encoding=3, text=[req.artist]))
+        if req.album:  audio.delall("TALB"); audio.add(TALB(encoding=3, text=[req.album]))
+        if req.year:   audio.delall("TDRC"); audio.add(TDRC(encoding=3, text=[req.year]))
+        if req.genre:  audio.delall("TCON"); audio.add(TCON(encoding=3, text=[req.genre]))
+
+        audio.save(str(file_path))
+
+        # Read back what we just wrote so the client can verify
+        saved = {}
+        if "TIT2" in audio: saved["title"]  = str(audio["TIT2"])
+        if "TPE1" in audio: saved["artist"] = str(audio["TPE1"])
+        if "TALB" in audio: saved["album"]  = str(audio["TALB"])
+        if "TDRC" in audio: saved["year"]   = str(audio["TDRC"])
+        if "TCON" in audio: saved["genre"]  = str(audio["TCON"])
+
+        return {"ok": True, "filename": req.filename, "tags": saved}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Tagging failed: {e}")
 
 
 if __name__ == "__main__":
