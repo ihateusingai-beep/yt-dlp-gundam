@@ -790,17 +790,55 @@
                 document.getElementById('videoSize').textContent    = formatBytes(data.filesize);
                 previewStats.style.display = 'grid';
 
-                // Populate format dropdown with available formats
-                const hasVideo  = data.formats.some(f => f.vcodec !== 'none');
-                const hasAudio  = data.formats.some(f => f.acodec !== 'none' && f.vcodec === 'none');
-                formatSelect.innerHTML = `
-                    <option value="">-- SELECT FORMAT --</option>
-                    <option value="best">Best Quality (Auto)</option>
-                    ${data.formats.some(f => f.ext === 'mp4' && f.vcodec !== 'none')  ? '<option value="mp4">MP4 (Video)</option>' : ''}
-                    ${data.formats.some(f => f.ext === 'webm' && f.vcodec !== 'none') ? '<option value="webm">WebM (Video)</option>' : ''}
-                    ${hasAudio ? '<option value="bestaudio">Audio Only (Original)</option>' : ''}
-                    ${hasAudio ? '<option value="mp3">🎵 MP3 (192kbps, requires FFmpeg)</option>' : ''}
-                `;
+                // Populate format dropdown using server-reported available qualities
+                const av = data.available || {};
+                const heights = av.video_heights || [];
+                const bitrates = av.audio_bitrates || [];
+                const hasVideo = heights.length > 0;
+                const hasAudio = av.audio;
+
+                // Build quality optgroups. value is "fmt|q" — sent to backend.
+                const opts = ['<option value="">-- SELECT FORMAT --</option>'];
+
+                // Best auto
+                opts.push('<option value="best|best">Best Quality (Auto)</option>');
+
+                // MP4 video group
+                if (av.mp4 && heights.length) {
+                    const mp4Opts = heights.map(h =>
+                        `<option value="mp4|${h}">MP4 — ${h}p</option>`
+                    ).join('');
+                    opts.push(`<optgroup label="MP4 Video">${mp4Opts}</optgroup>`);
+                }
+
+                // WebM video group
+                if (av.webm && heights.length) {
+                    const webmOpts = heights.map(h =>
+                        `<option value="webm|${h}">WebM — ${h}p</option>`
+                    ).join('');
+                    opts.push(`<optgroup label="WebM Video">${webmOpts}</optgroup>`);
+                }
+
+                // Audio group (MP3 transcode + original)
+                if (hasAudio) {
+                    opts.push(`<optgroup label="Audio (requires FFmpeg for MP3)">`);
+                    opts.push(`<option value="audio|best">Original Audio Stream</option>`);
+                    // Show available bitrates, plus standard 320/192/128 fallbacks
+                    const seen = new Set();
+                    bitrates.forEach(br => {
+                        // Round to standard MP3 bitrates
+                        let std = br >= 320 ? 320 : br >= 192 ? 192 : br >= 128 ? 128 : 96;
+                        if (seen.has(std)) return;
+                        seen.add(std);
+                        opts.push(`<option value="mp3|${std}">MP3 — ${std} kbps</option>`);
+                    });
+                    if (!seen.has(192)) opts.push(`<option value="mp3|192">MP3 — 192 kbps (default)</option>`);
+                    if (!seen.has(128)) opts.push(`<option value="mp3|128">MP3 — 128 kbps</option>`);
+                    if (!seen.has(320)) opts.push(`<option value="mp3|320">MP3 — 320 kbps (max)</option>`);
+                    opts.push(`</optgroup>`);
+                }
+
+                formatSelect.innerHTML = opts.join('');
 
                 setButtonsState({ analyzing: false, downloading: false, canDownload: true });
                 downloadBtn.disabled = true;   // force format selection first
@@ -824,7 +862,8 @@
         // ------------------------------------------------------------------------- //
         downloadBtn.addEventListener('click', () => {
             const url  = urlInput.value.trim();
-            const fmt  = formatSelect.value || 'best';
+            // value is "fmt|q" — split into two query params
+            const [fmt, q] = (formatSelect.value || 'best|best').split('|');
             if (!url) return;
 
             // Close any stale EventSource
@@ -839,7 +878,7 @@
             progressText.textContent         = 'INITIALIZING...';
 
             activeSource = new EventSource(
-                `/api/download?url=${encodeURIComponent(url)}&fmt=${encodeURIComponent(fmt)}`
+                `/api/download?url=${encodeURIComponent(url)}&fmt=${encodeURIComponent(fmt)}&q=${encodeURIComponent(q || 'best')}`
             );
 
             activeSource.onmessage = (e) => {

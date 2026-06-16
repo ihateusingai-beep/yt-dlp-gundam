@@ -173,12 +173,32 @@ async def info(url: str):
             m, s = divmod(rem, 60)
             return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
+        # Compute available qualities for the frontend dropdown
+        video_heights = sorted({
+            f.get("height") for f in formats
+            if f.get("height") and f.get("vcodec") not in (None, "none")
+        }, reverse=True)
+        audio_bitrates = sorted({
+            int(f.get("abr") or 0) for f in formats
+            if f.get("acodec") not in (None, "none") and (f.get("abr") or 0) > 0
+        }, reverse=True)
+        has_mp4 = any(f.get("ext") == "mp4" and f.get("vcodec") not in (None, "none") for f in formats)
+        has_webm = any(f.get("ext") == "webm" and f.get("vcodec") not in (None, "none") for f in formats)
+        has_audio = any(f.get("acodec") not in (None, "none") and f.get("vcodec") in (None, "none") for f in formats)
+
         return {
             "title":      raw.get("title", "Unknown"),
             "thumbnail":  raw.get("thumbnail", ""),
             "duration":   duration_str(raw.get("duration")),
             "resolution": resolution_label(best_video),
             "filesize":   fmt_filesize(best_video),
+            "available": {
+                "mp4":       has_mp4,
+                "webm":      has_webm,
+                "audio":     has_audio,
+                "video_heights":  video_heights,
+                "audio_bitrates": audio_bitrates,
+            },
             "formats": [
                 {
                     "format_id": f["format_id"],
@@ -207,7 +227,7 @@ async def info(url: str):
 # /api/download – SSE progress stream via progress_hooks
 # --------------------------------------------------------------------------- #
 @app.get("/api/download")
-async def download(url: str, request: Request, fmt: str = "best"):
+async def download(url: str, request: Request, fmt: str = "best", q: str = "best"):
     if not url:
         raise HTTPException(status_code=400, detail="url query parameter is required")
 
@@ -241,21 +261,37 @@ async def download(url: str, request: Request, fmt: str = "best"):
             main_loop.call_soon_threadsafe(q.put_nowait, out)
         return hook
 
-    # Map frontend "best" / "mp4" / "webm" / "mp3" to yt-dlp format strings.
-    FORMAT_MAP = {
-        "best":              "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-        "bestvideo+bestaudio": "bestvideo+bestaudio/best",
-        "bestvideo":         "bestvideo/best",
-        "bestaudio":         "bestaudio/best",
-        "mp4":               "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-        "webm":              "bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/best",
-        "mp3":               "bestaudio/best",
-    }
-    ydl_format = FORMAT_MAP.get(fmt, "best")
+    # Map frontend fmt string to yt-dlp format selector. The `q` param
+    # further refines the selector: video heights (480/720/1080/2160) or
+    # audio bitrates (128/192/320) for MP3 extraction.
+    # fmt=q (default): yt-dlp picks best available
+    def build_format(fmt: str, q: str) -> str:
+        # Video heights
+        if q in ("2160", "1080", "720", "480", "360", "240", "144"):
+            h = q
+            if fmt == "mp4":
+                return f"bestvideo[height<={h}][ext=mp4]+bestaudio[ext=m4a]/best[height<={h}][ext=mp4]/best"
+            if fmt == "webm":
+                return f"bestvideo[height<={h}][ext=webm]+bestaudio[ext=webm]/best[height<={h}][ext=webm]/best"
+            if fmt == "video":
+                return f"bestvideo[height<={h}]+bestaudio/best[height<={h}]"
+        # Audio bitrates (use for MP3)
+        if q in ("320", "192", "128", "96", "64"):
+            br = q
+            if fmt == "mp3" or fmt == "audio":
+                return f"bestaudio[abr<={br}]/bestaudio/best"
+        # Fallback (no quality constraint)
+        if fmt == "mp3" or fmt == "audio":
+            return "bestaudio/best"
+        if fmt == "webm":
+            return "bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/best"
+        if fmt == "mp4":
+            return "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+        # default 'best'
+        return "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
 
-    # If user asked for MP3, configure postprocessor to extract audio as MP3.
-    # This requires FFmpeg (auto-detected via FFMPEG_PATH).
-    is_audio_extract = fmt == "mp3"
+    ydl_format = build_format(fmt, q)
+    is_audio_extract = fmt in ("mp3", "audio")
 
     async def event_generator():
         async with download_lock:
@@ -270,12 +306,13 @@ async def download(url: str, request: Request, fmt: str = "best"):
             if FFMPEG_PATH:
                 ydl_opts["ffmpeg_location"] = FFMPEG_PATH
             if is_audio_extract:
-                # Extract best audio → transcode to MP3 192 kbps.
+                # Extract best audio → transcode to MP3 at user-requested kbps.
                 # Requires FFmpeg in PATH (or set ffmpeg_location above).
+                audio_quality = q if q in ("320", "192", "128", "96", "64") else "192"
                 ydl_opts["postprocessors"] = [{
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
-                    "preferredquality": "192",
+                    "preferredquality": audio_quality,
                 }]
 
             # main_loop was captured up top (closure for make_hook). Reuse it
