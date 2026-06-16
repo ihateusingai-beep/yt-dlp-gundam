@@ -85,11 +85,10 @@ jobs:
         if: github.event.inputs.tag != ''
         env:
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
           name: ${{ env.TAG }} — yt-dlp Gundam Dashboard
           files: yt_dlp_gundam-win64.zip
           draft: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
