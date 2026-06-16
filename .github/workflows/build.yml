@@ -1,0 +1,65 @@
+name: Build Windows Portable .exe
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller yt_dlp_gundam.spec --noconfirm
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: yt-dlp-gundam-win64
+          path: dist/yt_dlp_gundam/
+          retention-days: 30
+
+      - name: Create Release (optional)
+        if: github.event.inputs.tag != '' || github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          $tag = "${{ env.TAG }}"
+          if (-not $tag.StartsWith("v")) { $tag = "v$tag" }
+          echo "TAG=$tag" >> $env:GITHUB_ENV
+
+      - name: Create zip for release
+        if: github.event.inputs.tag != ''
+        run: |
+          Compress-Archive -Path "dist/yt_dlp_gundam" -DestinationPath "yt_dlp_gundam-win64.zip" -Force
+
+      - name: Upload zip to release
+        if: github.event.inputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: ${{ env.TAG }} — yt-dlp Gundam Dashboard
+          files: yt_dlp_gundam-win64.zip
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
