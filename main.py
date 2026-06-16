@@ -240,7 +240,7 @@ async def download(url: str, request: Request, fmt: str = "best"):
             main_loop.call_soon_threadsafe(q.put_nowait, out)
         return hook
 
-    # Map frontend "best" / "mp4" / "webm" / etc. to yt-dlp format strings.
+    # Map frontend "best" / "mp4" / "webm" / "mp3" to yt-dlp format strings.
     FORMAT_MAP = {
         "best":              "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "bestvideo+bestaudio": "bestvideo+bestaudio/best",
@@ -248,8 +248,13 @@ async def download(url: str, request: Request, fmt: str = "best"):
         "bestaudio":         "bestaudio/best",
         "mp4":               "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "webm":              "bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/best",
+        "mp3":               "bestaudio/best",
     }
     ydl_format = FORMAT_MAP.get(fmt, "best")
+
+    # If user asked for MP3, configure postprocessor to extract audio as MP3.
+    # This requires FFmpeg (auto-detected via FFMPEG_PATH).
+    is_audio_extract = fmt == "mp3"
 
     async def event_generator():
         async with download_lock:
@@ -263,6 +268,14 @@ async def download(url: str, request: Request, fmt: str = "best"):
             }
             if FFMPEG_PATH:
                 ydl_opts["ffmpeg_location"] = FFMPEG_PATH
+            if is_audio_extract:
+                # Extract best audio → transcode to MP3 192 kbps.
+                # Requires FFmpeg in PATH (or set ffmpeg_location above).
+                ydl_opts["postprocessors"] = [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }]
 
             # main_loop was captured up top (closure for make_hook). Reuse it
             # here to avoid a second asyncio.get_running_loop() call.

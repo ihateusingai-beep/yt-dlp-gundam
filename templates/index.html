@@ -782,7 +782,8 @@
                     <option value="best">Best Quality (Auto)</option>
                     ${data.formats.some(f => f.ext === 'mp4' && f.vcodec !== 'none')  ? '<option value="mp4">MP4 (Video)</option>' : ''}
                     ${data.formats.some(f => f.ext === 'webm' && f.vcodec !== 'none') ? '<option value="webm">WebM (Video)</option>' : ''}
-                    ${hasAudio ? '<option value="bestaudio">Audio Only</option>' : ''}
+                    ${hasAudio ? '<option value="bestaudio">Audio Only (Original)</option>' : ''}
+                    ${hasAudio ? '<option value="mp3">🎵 MP3 (192kbps, requires FFmpeg)</option>' : ''}
                 `;
 
                 setButtonsState({ analyzing: false, downloading: false, canDownload: true });
