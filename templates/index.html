@@ -702,12 +702,20 @@
             completionPanel.style.display   = 'none';
         }
 
+        // Sanitize a message for HTML interpolation. Strips ANSI escape
+        // sequences (which yt-dlp error strings sometimes contain) so
+        // the browser console doesn't render them as color codes.
+        function sanitizeMsg(msg) {
+            if (!msg) return '';
+            return String(msg).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
+        }
+
         function showError(msg) {
             setPreview(`
                 <div style="color: var(--danger); font-family: 'Orbitron', sans-serif; font-size: 1.2rem;">
                     SIGNAL LOST
                 </div>
-                <p style="color: var(--text-dim); margin-top: 10px;">${msg}</p>
+                <p style="color: var(--text-dim); margin-top: 10px;">${sanitizeMsg(msg)}</p>
             `);
         }
 

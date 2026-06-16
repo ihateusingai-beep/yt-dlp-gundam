@@ -4,6 +4,7 @@ yt-dlp Gundam Dashboard - FastAPI Backend
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -135,14 +136,34 @@ async def info(url: str):
         # Project to the fields the frontend needs.
         # Handle both single-video and playlist-entry dicts.
         formats = raw.get("formats") or []
-        best_format = next(
-            (f for f in formats if f.get("vcodec") != "none" and f.get("acodec") != "none"),
-            formats[-1] if formats else {},
+
+        # Pick the highest-quality video format (max height → max tbr).
+        # Don't require both vcodec and acodec — combined formats are
+        # pre-merged; many videos only have separate streams.
+        def _sort_key(f):
+            h = f.get("height") or 0
+            tbr = f.get("tbr") or 0
+            return (h, tbr)
+
+        best_video = max(
+            (f for f in formats if f.get("vcodec") and f.get("vcodec") != "none"),
+            key=_sort_key,
+            default={},
         )
 
         def fmt_filesize(f):
             fs = f.get("filesize") or f.get("filesize_approx") or 0
             return fs
+
+        def resolution_label(f):
+            h = f.get("height")
+            if h:
+                return f"{h}p"
+            note = f.get("format_note")
+            if note:
+                return note
+            w = f.get("width")
+            return f"{w}x{f.get('height')}" if w else "N/A"
 
         def duration_str(seconds):
             if not seconds:
@@ -155,13 +176,13 @@ async def info(url: str):
             "title":      raw.get("title", "Unknown"),
             "thumbnail":  raw.get("thumbnail", ""),
             "duration":   duration_str(raw.get("duration")),
-            "resolution": best_format.get("format_note") or best_format.get("width", "") or "N/A",
-            "filesize":   fmt_filesize(best_format),
+            "resolution": resolution_label(best_video),
+            "filesize":   fmt_filesize(best_video),
             "formats": [
                 {
                     "format_id": f["format_id"],
                     "ext":       f.get("ext", ""),
-                    "resolution": f.get("format_note") or f"{f.get('width','')}x{f.get('height','')}".strip("x") or "audio",
+                    "resolution": resolution_label(f),
                     "vcodec":    f.get("vcodec", "none"),
                     "acodec":    f.get("acodec", "none"),
                 }
@@ -170,9 +191,15 @@ async def info(url: str):
             ],
         }
     except yt_dlp.utils.DownloadError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        # Clean the error: yt-dlp prefixes with "ERROR: [site] " which the
+        # browser console mis-renders as an ANSI color escape (e.g. "[0;31, error]").
+        msg = str(e).strip()
+        msg = re.sub(r"^ERROR:\s*\[[^\]]+\]\s*", "", msg)
+        raise HTTPException(status_code=422, detail=msg or "Download error")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        msg = str(e).strip()
+        msg = re.sub(r"^ERROR:\s*\[[^\]]+\]\s*", "", msg)
+        raise HTTPException(status_code=500, detail=msg or "Internal server error")
 
 
 # --------------------------------------------------------------------------- #
