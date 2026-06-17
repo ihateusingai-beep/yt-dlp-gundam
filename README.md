@@ -2,7 +2,7 @@
 
 Gundam NT-D cockpit-style video downloader. Download YouTube/videos without command line.
 
-**Current version: 0.7.0** — see [`__version__` in `main.py`](./main.py) for the latest.
+**Current version: 0.8.0** — see [`__version__` in `main.py`](./main.py) for the latest.
 
 ## Versioning
 

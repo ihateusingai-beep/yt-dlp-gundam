@@ -24,7 +24,7 @@ from pydantic import BaseModel
 #   MINOR — new feature
 #   PATCH — bug fix / polish
 # The CI workflow reads this and stamps it onto artifact + exe metadata.
-__version__ = "0.7.2"
+__version__ = "0.8.0"
 
 # --------------------------------------------------------------------------- #
 # Paths
