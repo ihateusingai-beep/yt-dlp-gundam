@@ -416,6 +416,17 @@ async def list_files():
 
 
 # --------------------------------------------------------------------------- #
+# /api/folder – return the absolute downloads directory path. The dashboard's
+# "Open Folder" button calls this so it can show the user where their files
+# landed (and copy the path to the clipboard). We don't try to spawn a file
+# manager from the server — the browser handles the user-visible action.
+# --------------------------------------------------------------------------- #
+@app.get("/api/folder")
+async def get_folder():
+    return {"path": str(DOWNLOADS)}
+
+
+# --------------------------------------------------------------------------- #
 # /api/files/{name} – download a specific file
 # --------------------------------------------------------------------------- #
 @app.get("/api/files/{filename}")
