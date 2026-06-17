@@ -130,11 +130,6 @@ def get_ffmpeg_version() -> str:
 print(f"[health] FFmpeg {'found: ' + FFMPEG_PATH + ' (' + get_ffmpeg_version() + ')' if FFMPEG_PATH else 'NOT found – some features may be limited'}")
 
 # --------------------------------------------------------------------------- #
-# FastAPI app
-# --------------------------------------------------------------------------- #
-app = FastAPI(title="yt-dlp Gundam Dashboard", version=__version__)
-
-# --------------------------------------------------------------------------- #
 # Static / HTML
 # --------------------------------------------------------------------------- #
 @app.get("/", response_class=HTMLResponse)
