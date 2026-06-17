@@ -5,34 +5,134 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gundam NT-D Download Console</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <script>
+        // ------------------------------------------------------------------ //
+        // FOUC prevention — apply saved theme synchronously before first paint
+        // ------------------------------------------------------------------ //
+        (function () {
+            try {
+                var t = localStorage.getItem('yt-dlp-gundam.theme') || 'ntd';
+                document.documentElement.dataset.themePending = t;
+            } catch (e) {
+                document.documentElement.dataset.themePending = 'ntd';
+            }
+        })();
+    </script>
     <style>
-        :root {
-            --bg-dark: #0a0f1a;
-            --bg-panel: #0d1424;
-            --cyan: #00D4FF;
-            --cyan-dim: #006680;
-            --pink: #FF69B4;
-            --pink-dim: #993d66;
-            --text: #c0e8ff;
-            --text-dim: #4a6a8a;
-            --success: #00FF88;
-            --warning: #FFB800;
-            --danger: #FF3366;
+        /* ============================================================== */
+        /*  THEME PALETTES  (default NT-D in :root, others as body classes) */
+        /* ============================================================== */
+        :root, .theme-ntd {
+            --bg:          #0a0f1a;
+            --bg-panel:    #0d1424;
+            --accent:      #00D4FF;
+            --accent-dim:  #006680;
+            --accent2:     #FF69B4;
+            --accent2-dim: #993d66;
+            --text:        #c0e8ff;
+            --text-dim:    #4a6a8a;
+            --success:     #00FF88;
+            --warning:     #FFB800;
+            --danger:      #FF3366;
+        }
+        .theme-rx78 {
+            --bg:          #0f1a2e;
+            --bg-panel:    #142340;
+            --accent:      #DC2626;
+            --accent-dim:  #7F1D1D;
+            --accent2:     #2563EB;
+            --accent2-dim: #1E3A8A;
+            --text:        #F5F5F5;
+            --text-dim:    #737373;
+            --success:     #22C55E;
+            --warning:     #EAB308;
+            --danger:      #EF4444;
+        }
+        .theme-zaku {
+            --bg:          #1a0a0a;
+            --bg-panel:    #2a1010;
+            --accent:      #B91C1C;
+            --accent-dim:  #7F1D1D;
+            --accent2:     #16A34A;
+            --accent2-dim: #14532D;
+            --text:        #D4D4D4;
+            --text-dim:    #737373;
+            --success:     #22C55E;
+            --warning:     #D97706;
+            --danger:      #DC2626;
+        }
+        .theme-wing {
+            --bg:          #0f0f0a;
+            --bg-panel:    #1a1a0f;
+            --accent:      #D4A017;
+            --accent-dim:  #7F5F0F;
+            --accent2:     #15803D;
+            --accent2-dim: #14532D;
+            --text:        #F0EAD6;
+            --text-dim:    #737373;
+            --success:     #22C55E;
+            --warning:     #D4A017;
+            --danger:      #C73E1D;
+        }
+        .theme-mono {
+            --bg:          #0a0a0a;
+            --bg-panel:    #141414;
+            --accent:      #E5E5E5;
+            --accent-dim:  #525252;
+            --accent2:     #6B6B6B;
+            --accent2-dim: #404040;
+            --text:        #FAFAFA;
+            --text-dim:    #737373;
+            --success:     #A3A3A3;
+            --warning:     #A3A3A3;
+            --danger:      #A3A3A3;
+        }
+        .theme-witch {
+            --bg:          #1A1410;
+            --bg-panel:    #241B14;
+            --accent:      #FF6B35;
+            --accent-dim:  #993D1F;
+            --accent2:     #1AAFA0;
+            --accent2-dim: #0E5A52;
+            --text:        #F0E6D2;
+            --text-dim:    #9A8472;
+            --success:     #7CC142;
+            --warning:     #D4A017;
+            --danger:      #C73E1D;
+        }
+        .theme-custom {
+            /* Custom colors injected via JS — defaults to NT-D in case
+               the variables aren't set yet. */
+            --bg:          #0a0f1a;
+            --bg-panel:    #0d1424;
+            --accent:      #00D4FF;
+            --accent-dim:  #006680;
+            --accent2:     #FF69B4;
+            --accent2-dim: #993d66;
+            --text:        #c0e8ff;
+            --text-dim:    #4a6a8a;
+            --success:     #00FF88;
+            --warning:     #FFB800;
+            --danger:      #FF3366;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            background: var(--bg-dark);
+            background: var(--bg);
             color: var(--text);
             font-family: 'Share Tech Mono', monospace;
             min-height: 100vh;
             overflow-x: hidden;
             position: relative;
+            transition: background 0.3s ease, color 0.3s ease;
         }
 
-        /* Scanlines Overlay */
-        body::before {
+        /* ============================================================== */
+        /*  THEME SIGNATURE EFFECTS  (scanlines / CRT / feather / ripple)  */
+        /* ============================================================== */
+        /* NT-D: cyan scanlines + CRT flicker (default) */
+        body.theme-ntd::before {
             content: '';
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
@@ -46,13 +146,11 @@
             pointer-events: none;
             z-index: 9999;
         }
-
-        /* CRT Flicker */
         @keyframes flicker {
             0%, 100% { opacity: 1; }
-            50% { opacity: 0.98; }
+            50%      { opacity: 0.98; }
         }
-        body::after {
+        body.theme-ntd::after {
             content: '';
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
@@ -61,6 +159,84 @@
             z-index: 9998;
             animation: flicker 0.1s infinite;
         }
+        /* RX-78: clean (no overlay) */
+        body.theme-rx78::before,
+        body.theme-rx78::after { display: none; }
+        /* ZAKU: thicker red scanlines + tiny shake */
+        @keyframes zakuShake {
+            0%, 100% { transform: translate(0, 0); }
+            50%      { transform: translate(0, 1px); }
+        }
+        body.theme-zaku::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 3px,
+                rgba(185, 28, 28, 0.08) 3px,
+                rgba(185, 28, 28, 0.08) 6px
+            );
+            pointer-events: none;
+            z-index: 9999;
+            animation: zakuShake 2s ease-in-out infinite;
+        }
+        body.theme-zaku::after { display: none; }
+        /* WING: slow gold feathers (diagonal gradient slide) */
+        @keyframes wingFeather {
+            0%   { background-position: 0 0; }
+            100% { background-position: 200px 200px; }
+        }
+        body.theme-wing::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: repeating-linear-gradient(
+                135deg,
+                transparent 0,
+                transparent 18px,
+                rgba(212, 160, 23, 0.04) 18px,
+                rgba(212, 160, 23, 0.04) 20px
+            );
+            pointer-events: none;
+            z-index: 9999;
+            animation: wingFeather 8s linear infinite;
+        }
+        body.theme-wing::after { display: none; }
+        /* MONO: no overlay */
+        body.theme-mono::before,
+        body.theme-mono::after { display: none; }
+        /* WITCH: gold permet ripple (radial expansion 4s) */
+        @keyframes witchRipple {
+            0%   { background: radial-gradient(circle at 50% 50%, rgba(212,160,23,0.10) 0%, transparent 0%); }
+            100% { background: radial-gradient(circle at 50% 50%, rgba(212,160,23,0.10) 100%, transparent 100%); }
+        }
+        body.theme-witch::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 9999;
+            animation: witchRipple 4s ease-out infinite;
+        }
+        body.theme-witch::after { display: none; }
+        /* CUSTOM: subtle accent-tinted scanlines, recolored by JS */
+        body.theme-custom::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(255, 255, 255, 0.025) 2px,
+                rgba(255, 255, 255, 0.025) 4px
+            );
+            pointer-events: none;
+            z-index: 9999;
+        }
+        body.theme-custom::after { display: none; }
 
         .container {
             max-width: 1200px;
@@ -70,11 +246,13 @@
             z-index: 1;
         }
 
-        /* Header */
+        /* ============================================================== */
+        /*  Header                                                          */
+        /* ============================================================== */
         .header {
             text-align: center;
             padding: 20px 0 30px;
-            border-bottom: 2px solid var(--cyan-dim);
+            border-bottom: 2px solid var(--accent-dim);
             margin-bottom: 30px;
             position: relative;
         }
@@ -86,7 +264,7 @@
             bottom: -2px;
             width: 20px;
             height: 20px;
-            border: 2px solid var(--cyan);
+            border: 2px solid var(--accent);
         }
 
         .header::before {
@@ -105,23 +283,136 @@
             font-family: 'Orbitron', sans-serif;
             font-size: 2.5rem;
             font-weight: 900;
-            color: var(--cyan);
-            text-shadow: 0 0 20px var(--cyan), 0 0 40px var(--cyan-dim);
+            color: var(--accent);
+            text-shadow: 0 0 20px var(--accent), 0 0 40px var(--accent-dim);
             letter-spacing: 4px;
             margin-bottom: 10px;
+            transition: color 0.3s ease, text-shadow 0.3s ease;
         }
 
         .subtitle {
-            color: var(--pink);
+            color: var(--accent2);
             font-size: 0.9rem;
             letter-spacing: 6px;
             text-transform: uppercase;
+            transition: color 0.3s ease;
         }
 
-        /* Energy Bar */
+        /* ============================================================== */
+        /*  Theme controls in header                                        */
+        /* ============================================================== */
+        .header-theme-controls {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .theme-select-wrap {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .theme-select-wrap label {
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            letter-spacing: 2px;
+        }
+        .select-field.compact {
+            width: auto;
+            padding: 6px 30px 6px 12px;
+            font-size: 0.75rem;
+            background-position: right 10px center;
+        }
+        .custom-toggle {
+            background: transparent;
+            border: 1px solid var(--accent-dim);
+            color: var(--accent);
+            padding: 6px 12px;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.7rem;
+            letter-spacing: 2px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .custom-toggle:hover {
+            border-color: var(--accent);
+            background: rgba(255,255,255,0.04);
+        }
+        .custom-toggle.active {
+            background: var(--accent);
+            color: var(--bg);
+        }
+
+        /* Custom theme panel */
+        .custom-panel {
+            position: fixed;
+            top: 0; right: 0;
+            width: 280px;
+            height: 100vh;
+            background: var(--bg-panel);
+            border-left: 2px solid var(--accent);
+            padding: 24px 20px;
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            z-index: 1000;
+            box-shadow: -4px 0 20px rgba(0,0,0,0.4);
+        }
+        .custom-panel.open { transform: translateX(0); }
+        .custom-panel h3 {
+            font-family: 'Orbitron', sans-serif;
+            color: var(--accent);
+            font-size: 0.85rem;
+            letter-spacing: 3px;
+            margin-bottom: 20px;
+        }
+        .custom-panel .input-group {
+            margin-bottom: 16px;
+        }
+        .custom-panel label {
+            display: block;
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            letter-spacing: 1.5px;
+            margin-bottom: 6px;
+        }
+        .custom-panel input[type="color"] {
+            width: 100%;
+            height: 36px;
+            border: 1px solid var(--accent-dim);
+            background: var(--bg);
+            cursor: pointer;
+            padding: 2px;
+        }
+        .custom-panel .panel-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 24px;
+        }
+        .custom-panel .panel-actions .btn {
+            flex: 1;
+            padding: 8px 12px;
+            font-size: 0.7rem;
+        }
+        .custom-close {
+            position: absolute;
+            top: 12px; right: 12px;
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            font-size: 1.4rem;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .custom-close:hover { color: var(--accent); }
+
+        /* ============================================================== */
+        /*  Energy Bar                                                       */
+        /* ============================================================== */
         .energy-bar-container {
             background: var(--bg-panel);
-            border: 1px solid var(--cyan-dim);
+            border: 1px solid var(--accent-dim);
             padding: 15px 20px;
             margin-bottom: 25px;
             position: relative;
@@ -132,16 +423,16 @@
             position: absolute;
             top: -10px;
             left: 20px;
-            background: var(--bg-dark);
+            background: var(--bg);
             padding: 0 10px;
             font-size: 0.7rem;
-            color: var(--cyan);
+            color: var(--accent);
             letter-spacing: 2px;
         }
 
         .energy-bar {
             height: 30px;
-            background: linear-gradient(90deg, var(--pink-dim) 0%, var(--pink) 50%, var(--cyan) 100%);
+            background: linear-gradient(90deg, var(--accent2-dim) 0%, var(--accent2) 50%, var(--accent) 100%);
             border-radius: 2px;
             position: relative;
             overflow: hidden;
@@ -170,15 +461,17 @@
         }
 
         @keyframes energyPulse {
-            0% { left: -50px; }
+            0%   { left: -50px; }
             100% { left: 100%; }
         }
 
-        /* HUD Corners */
+        /* ============================================================== */
+        /*  HUD Panels                                                       */
+        /* ============================================================== */
         .hud-panel {
             position: relative;
             background: var(--bg-panel);
-            border: 1px solid var(--cyan-dim);
+            border: 1px solid var(--accent-dim);
             padding: 25px;
             margin-bottom: 25px;
         }
@@ -191,7 +484,7 @@
             position: absolute;
             width: 30px;
             height: 30px;
-            border: 2px solid var(--cyan);
+            border: 2px solid var(--accent);
         }
 
         .hud-panel::before {
@@ -220,15 +513,49 @@
 
         .panel-title {
             font-family: 'Orbitron', sans-serif;
-            color: var(--cyan);
+            color: var(--accent);
             font-size: 0.8rem;
             letter-spacing: 3px;
             margin-bottom: 20px;
             padding-bottom: 10px;
-            border-bottom: 1px solid var(--cyan-dim);
+            border-bottom: 1px solid var(--accent-dim);
         }
 
-        /* Form Elements */
+        /* Files panel header row (title + open folder button) */
+        .panel-header-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--accent-dim);
+        }
+        .panel-header-row .panel-title {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+        .folder-btn {
+            background: transparent;
+            border: 1px solid var(--accent-dim);
+            color: var(--accent);
+            padding: 6px 14px;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.7rem;
+            letter-spacing: 2px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+        }
+        .folder-btn:hover {
+            border-color: var(--accent);
+            background: rgba(255,255,255,0.04);
+        }
+
+        /* ============================================================== */
+        /*  Form Elements                                                   */
+        /* ============================================================== */
         .input-group {
             margin-bottom: 20px;
         }
@@ -244,8 +571,8 @@
 
         .input-field {
             width: 100%;
-            background: rgba(0, 212, 255, 0.05);
-            border: 1px solid var(--cyan-dim);
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--accent-dim);
             color: var(--text);
             padding: 15px;
             font-family: 'Share Tech Mono', monospace;
@@ -255,19 +582,21 @@
 
         .input-field:focus {
             outline: none;
-            border-color: var(--cyan);
-            box-shadow: 0 0 20px rgba(0, 212, 255, 0.2), inset 0 0 20px rgba(0, 212, 255, 0.05);
+            border-color: var(--accent);
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.08), inset 0 0 20px rgba(255, 255, 255, 0.03);
         }
 
         .input-field::placeholder {
             color: var(--text-dim);
         }
 
-        /* Buttons */
+        /* ============================================================== */
+        /*  Buttons                                                         */
+        /* ============================================================== */
         .btn {
-            background: linear-gradient(180deg, var(--cyan-dim) 0%, #004d60 100%);
-            border: 1px solid var(--cyan);
-            color: var(--cyan);
+            background: linear-gradient(180deg, var(--accent-dim) 0%, rgba(0,0,0,0.4) 100%);
+            border: 1px solid var(--accent);
+            color: var(--accent);
             padding: 15px 30px;
             font-family: 'Orbitron', sans-serif;
             font-size: 0.9rem;
@@ -286,14 +615,14 @@
             top: 0; left: -100%;
             width: 100%;
             height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.3), transparent);
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
             transition: left 0.5s ease;
         }
 
         .btn:hover {
-            background: linear-gradient(180deg, var(--cyan) 0%, var(--cyan-dim) 100%);
-            color: var(--bg-dark);
-            box-shadow: 0 0 30px rgba(0, 212, 255, 0.5);
+            background: linear-gradient(180deg, var(--accent) 0%, var(--accent-dim) 100%);
+            color: var(--bg);
+            box-shadow: 0 0 30px rgba(255, 255, 255, 0.3);
         }
 
         .btn:hover::before {
@@ -312,26 +641,28 @@
         /* Select Dropdown */
         .select-field {
             width: 100%;
-            background: rgba(0, 212, 255, 0.05);
-            border: 1px solid var(--cyan-dim);
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--accent-dim);
             color: var(--text);
             padding: 15px;
             font-family: 'Share Tech Mono', monospace;
             font-size: 1rem;
             cursor: pointer;
             appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2300D4FF' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23ffffff' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
             background-repeat: no-repeat;
             background-position: right 15px center;
         }
 
         .select-field:focus {
             outline: none;
-            border-color: var(--cyan);
-            box-shadow: 0 0 20px rgba(0, 212, 255, 0.2);
+            border-color: var(--accent);
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.08);
         }
 
-        /* Progress Bar */
+        /* ============================================================== */
+        /*  Progress Bar                                                    */
+        /* ============================================================== */
         .progress-container {
             margin: 25px 0;
         }
@@ -345,15 +676,15 @@
 
         .progress-bar {
             height: 25px;
-            background: rgba(0, 212, 255, 0.1);
-            border: 1px solid var(--cyan-dim);
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--accent-dim);
             position: relative;
             overflow: hidden;
         }
 
         .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, var(--cyan-dim), var(--cyan));
+            background: linear-gradient(90deg, var(--accent-dim), var(--accent));
             width: 0%;
             transition: width 0.3s ease;
             position: relative;
@@ -380,14 +711,17 @@
             font-size: 0.75rem;
             font-weight: bold;
             color: var(--text);
-            text-shadow: 0 0 5px var(--bg-dark);
+            text-shadow: 0 0 5px var(--bg);
             z-index: 1;
+            white-space: nowrap;
         }
 
-        /* Video Preview */
+        /* ============================================================== */
+        /*  Video Preview                                                   */
+        /* ============================================================== */
         .preview-container {
             background: rgba(0, 0, 0, 0.5);
-            border: 1px solid var(--cyan-dim);
+            border: 1px solid var(--accent-dim);
             padding: 20px;
             text-align: center;
             min-height: 200px;
@@ -406,7 +740,7 @@
             content: '[ NO SIGNAL ]';
             display: block;
             font-size: 1.2rem;
-            color: var(--cyan-dim);
+            color: var(--accent-dim);
             margin-bottom: 15px;
             letter-spacing: 3px;
         }
@@ -414,7 +748,7 @@
         .preview-image {
             max-width: 100%;
             max-height: 300px;
-            border: 1px solid var(--cyan-dim);
+            border: 1px solid var(--accent-dim);
         }
 
         /* Status Display */
@@ -426,8 +760,8 @@
         }
 
         .status-item {
-            background: rgba(0, 212, 255, 0.05);
-            border: 1px solid var(--cyan-dim);
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--accent-dim);
             padding: 15px;
             text-align: center;
         }
@@ -442,10 +776,12 @@
         .status-value {
             font-family: 'Orbitron', sans-serif;
             font-size: 1.1rem;
-            color: var(--cyan);
+            color: var(--accent);
         }
 
-        /* Celebration Animation */
+        /* ============================================================== */
+        /*  Celebration Animation                                           */
+        /* ============================================================== */
         .celebration-overlay {
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
@@ -460,7 +796,7 @@
         }
 
         @keyframes celebrationFlash {
-            0% { background: rgba(0, 212, 255, 0.5); }
+            0%   { background: rgba(255, 255, 255, 0.3); }
             100% { background: transparent; }
         }
 
@@ -468,16 +804,18 @@
             position: absolute;
             width: 10px;
             height: 10px;
-            background: var(--cyan);
-            box-shadow: 0 0 10px var(--cyan);
+            background: var(--accent);
+            box-shadow: 0 0 10px var(--accent);
         }
 
         @keyframes particleExplode {
-            0% { transform: translate(0, 0) scale(1); opacity: 1; }
+            0%   { transform: translate(0, 0) scale(1); opacity: 1; }
             100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
         }
 
-        /* Completion Message */
+        /* ============================================================== */
+        /*  Completion Message                                              */
+        /* ============================================================== */
         .completion-message {
             text-align: center;
             padding: 30px;
@@ -490,8 +828,8 @@
         }
 
         @keyframes completionPulse {
-            0%, 100% { text-shadow: 0 0 20px var(--cyan); }
-            50% { text-shadow: 0 0 40px var(--cyan), 0 0 60px var(--pink); }
+            0%, 100% { text-shadow: 0 0 20px var(--accent); }
+            50%      { text-shadow: 0 0 40px var(--accent), 0 0 60px var(--accent2); }
         }
 
         .completion-text {
@@ -501,58 +839,187 @@
             letter-spacing: 5px;
         }
 
-        /* Grid Lines Background */
+        /* ============================================================== */
+        /*  Grid Lines Background                                           */
+        /* ============================================================== */
         .grid-bg {
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
-            background-image: 
-                linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+            background-image:
+                linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
             background-size: 50px 50px;
             z-index: 0;
         }
 
-        /* Responsive */
+        /* ============================================================== */
+        /*  TOASTS (F5/F6)                                                  */
+        /* ============================================================== */
+        #toastContainer {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 99999;
+            pointer-events: none;
+            max-width: 360px;
+        }
+        .toast {
+            background: var(--bg-panel);
+            border: 1px solid var(--danger);
+            border-left: 4px solid var(--danger);
+            color: var(--text);
+            padding: 14px 18px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            pointer-events: auto;
+            transform: translateX(120%);
+            opacity: 0;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+            word-break: break-word;
+        }
+        .toast.toast-success {
+            border-color: var(--success);
+            border-left-color: var(--success);
+        }
+        .toast.toast-info {
+            border-color: var(--accent);
+            border-left-color: var(--accent);
+        }
+        .toast.toast-in {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        .toast.toast-out {
+            transform: translateX(120%);
+            opacity: 0;
+        }
+
+        /* ============================================================== */
+        /*  BOOT OVERLAY (F10)                                              */
+        /* ============================================================== */
+        #bootOverlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: var(--bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100000;
+            animation: bootFade 0.8s ease-out forwards;
+            animation-delay: 0.4s;
+        }
+        #bootOverlay .boot-text {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.6rem;
+            color: var(--accent);
+            letter-spacing: 6px;
+            text-shadow: 0 0 20px var(--accent);
+            animation: bootTextPulse 0.4s ease-in-out infinite alternate;
+        }
+        @keyframes bootFade {
+            0%   { opacity: 1; }
+            100% { opacity: 0; visibility: hidden; }
+        }
+        @keyframes bootTextPulse {
+            0%   { opacity: 0.6; }
+            100% { opacity: 1; }
+        }
+
+        /* ============================================================== */
+        /*  Responsive                                                      */
+        /* ============================================================== */
         @media (max-width: 768px) {
             .title { font-size: 1.5rem; }
             .container { padding: 10px; }
             .hud-panel { padding: 15px; }
+            .custom-panel { width: 100vw; }
+            #toastContainer { right: 10px; bottom: 10px; max-width: calc(100vw - 20px); }
         }
 
-        /* NT-D Mode Indicator */
+        /* ============================================================== */
+        /*  NT-D Mode Indicator (legacy — kept for NT-D theme only)         */
+        /* ============================================================== */
         .ntd-indicator {
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            background: linear-gradient(90deg, var(--pink-dim), transparent);
+            background: linear-gradient(90deg, var(--accent2-dim), transparent);
             padding: 5px 15px;
             margin-top: 10px;
         }
+        body:not(.theme-ntd) .ntd-indicator { display: none; }
 
         .ntd-dot {
             width: 8px;
             height: 8px;
-            background: var(--pink);
+            background: var(--accent2);
             border-radius: 50%;
             animation: ntdPulse 1s infinite;
         }
 
         @keyframes ntdPulse {
-            0%, 100% { box-shadow: 0 0 5px var(--pink); }
-            50% { box-shadow: 0 0 15px var(--pink), 0 0 25px var(--pink); }
+            0%, 100% { box-shadow: 0 0 5px var(--accent2); }
+            50%      { box-shadow: 0 0 15px var(--accent2), 0 0 25px var(--accent2); }
         }
 
         .ntd-text {
             font-size: 0.7rem;
-            color: var(--pink);
+            color: var(--accent2);
             letter-spacing: 3px;
+        }
+
+        /* "CUSTOM" badge shown when custom theme is active */
+        .custom-badge {
+            display: inline-block;
+            background: var(--accent);
+            color: var(--bg);
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.65rem;
+            letter-spacing: 3px;
+            padding: 2px 8px;
+            margin-left: 6px;
+            vertical-align: middle;
         }
     </style>
 </head>
 <body>
+    <!-- Boot overlay (F10) -->
+    <div id="bootOverlay">
+        <div class="boot-text">// SYSTEM BOOT //</div>
+    </div>
+
     <div class="grid-bg"></div>
-    
     <div class="celebration-overlay" id="celebrationOverlay"></div>
+
+    <!-- Toast container (F5/F6) -->
+    <div id="toastContainer"></div>
+
+    <!-- Custom theme panel -->
+    <div class="custom-panel" id="customPanel">
+        <button class="custom-close" id="customCloseBtn" aria-label="Close">&times;</button>
+        <h3>// CUSTOM COLORS</h3>
+        <div class="input-group">
+            <label for="customAccent">ACCENT (PRIMARY)</label>
+            <input type="color" id="customAccent" value="#00D4FF">
+        </div>
+        <div class="input-group">
+            <label for="customAccent2">ACCENT2 (SECONDARY)</label>
+            <input type="color" id="customAccent2" value="#FF69B4">
+        </div>
+        <div class="input-group">
+            <label for="customBg">BACKGROUND</label>
+            <input type="color" id="customBg" value="#0a0f1a">
+        </div>
+        <div class="panel-actions">
+            <button class="btn" id="customResetBtn">RESET</button>
+            <button class="btn" id="customSaveBtn">SAVE</button>
+        </div>
+    </div>
 
     <div class="container">
         <!-- Header -->
@@ -563,8 +1030,26 @@
                 <span class="ntd-dot"></span>
                 <span class="ntd-text">NT-D ACTIVE</span>
             </div>
+
+            <!-- Theme picker -->
+            <div class="header-theme-controls">
+                <div class="theme-select-wrap">
+                    <label for="themeSelect">THEME</label>
+                    <select id="themeSelect" class="select-field compact">
+                        <option value="ntd">NT-D / Psychoframe</option>
+                        <option value="rx78">RX-78-2 / Original</option>
+                        <option value="zaku">Char's Zaku II</option>
+                        <option value="wing">Wing Zero</option>
+                        <option value="mono">Minimal Mono</option>
+                        <option value="witch">Witch from Mercury / Aerial</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
+                <button type="button" class="custom-toggle" id="customToggleBtn">+ CUSTOM</button>
+            </div>
+
             <div id="versionBadge" style="margin-top: 8px; font-size: 0.7rem; color: var(--text-dim); letter-spacing: 2px;">
-                v0.0.0
+                v0.0.0<span id="customBadge" class="custom-badge" style="display: none;">CUSTOM</span>
             </div>
         </header>
 
@@ -678,7 +1163,10 @@
         <div class="hud-panel" id="filesPanel">
             <div class="corner-bl"></div>
             <div class="corner-br"></div>
-            <h2 class="panel-title">// DOWNLOADED TARGETS</h2>
+            <div class="panel-header-row">
+                <h2 class="panel-title">// DOWNLOADED TARGETS</h2>
+                <button class="folder-btn" id="openFolderBtn">OPEN FOLDER</button>
+            </div>
             <div id="filesList" style="color: var(--text-dim); font-size: 0.85rem;">
                 Loading...
             </div>
@@ -686,35 +1174,221 @@
     </div>
 
     <script>
-        // DOM Elements
-        const urlInput        = document.getElementById('urlInput');
-        const analyzeBtn      = document.getElementById('analyzeBtn');
-        const formatSelect    = document.getElementById('formatSelect');
-        const downloadBtn     = document.getElementById('downloadBtn');
-        const previewContainer = document.getElementById('previewContainer');
-        const previewStats    = document.getElementById('previewStats');
-        const progressContainer = document.getElementById('progressContainer');
-        const progressFill    = document.getElementById('progressFill');
-        const progressText    = document.getElementById('progressText');
-        const progressPercent = document.getElementById('progressPercent');
-        const completionPanel = document.getElementById('completionPanel');
+        // ------------------------------------------------------------------ //
+        //  Constants                                                          //
+        // ------------------------------------------------------------------ //
+        const THEMES = ['ntd', 'rx78', 'zaku', 'wing', 'mono', 'witch'];
+        const STORAGE_KEY_THEME  = 'yt-dlp-gundam.theme';
+        const STORAGE_KEY_CUSTOM = 'yt-dlp-gundam.custom';
+        const DEFAULT_CUSTOM = { accent: '#00D4FF', accent2: '#FF69B4', bg: '#0a0f1a' };
+
+        // ------------------------------------------------------------------ //
+        //  DOM refs (declared early — used by theme init below)               //
+        // ------------------------------------------------------------------ //
+        const urlInput           = document.getElementById('urlInput');
+        const analyzeBtn         = document.getElementById('analyzeBtn');
+        const formatSelect       = document.getElementById('formatSelect');
+        const downloadBtn        = document.getElementById('downloadBtn');
+        const previewContainer   = document.getElementById('previewContainer');
+        const previewStats       = document.getElementById('previewStats');
+        const progressContainer  = document.getElementById('progressContainer');
+        const progressFill       = document.getElementById('progressFill');
+        const progressText       = document.getElementById('progressText');
+        const progressPercent    = document.getElementById('progressPercent');
+        const completionPanel    = document.getElementById('completionPanel');
         const celebrationOverlay = document.getElementById('celebrationOverlay');
+        const themeSelect        = document.getElementById('themeSelect');
+        const customToggleBtn    = document.getElementById('customToggleBtn');
+        const customPanel        = document.getElementById('customPanel');
+        const customCloseBtn     = document.getElementById('customCloseBtn');
+        const customAccent       = document.getElementById('customAccent');
+        const customAccent2      = document.getElementById('customAccent2');
+        const customBg           = document.getElementById('customBg');
+        const customResetBtn     = document.getElementById('customResetBtn');
+        const customSaveBtn      = document.getElementById('customSaveBtn');
+        const customBadge        = document.getElementById('customBadge');
+        const openFolderBtn      = document.getElementById('openFolderBtn');
+        const toastContainer     = document.getElementById('toastContainer');
 
-        // State
-        let analyzedData   = null;
-        let activeSource   = null;   // current EventSource
-        let lastDownloadFilename = null;  // most recently completed file
+        // ------------------------------------------------------------------ //
+        //  THEME system                                                       //
+        // ------------------------------------------------------------------ //
+        function clearThemeClasses() {
+            document.body.classList.remove('theme-ntd', 'theme-rx78', 'theme-zaku',
+                                           'theme-wing', 'theme-mono', 'theme-witch',
+                                           'theme-custom');
+        }
 
-        // Helpers
+        function applyCustomColors(colors) {
+            if (!colors) return;
+            const body = document.body.style;
+            if (colors.accent)  body.setProperty('--accent',  colors.accent);
+            if (colors.accent2) body.setProperty('--accent2', colors.accent2);
+            if (colors.bg)      body.setProperty('--bg',      colors.bg);
+            // Derive dim variants as 35% opacity of the accent. Simple
+            // mixer: take the hex, blend toward black by 65%.
+            if (colors.accent)  body.setProperty('--accent-dim',  mixHex(colors.accent,  0.35));
+            if (colors.accent2) body.setProperty('--accent2-dim', mixHex(colors.accent2, 0.35));
+            if (colors.bg)      body.setProperty('--bg-panel',    mixHex(colors.bg,      0.35));
+        }
+
+        function mixHex(hex, ratio) {
+            // Mix `hex` toward black by (1 - ratio). Returns #rrggbb.
+            const m = /^#?([a-f0-9]{6})$/i.exec(hex || '');
+            if (!m) return hex;
+            const n = parseInt(m[1], 16);
+            const r = Math.round(((n >> 16) & 0xff) * ratio);
+            const g = Math.round(((n >>  8) & 0xff) * ratio);
+            const b = Math.round((n         & 0xff) * ratio);
+            return '#' + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+        }
+
+        function applyTheme(id) {
+            clearThemeClasses();
+            if (id === 'custom') {
+                document.body.classList.add('theme-custom');
+                const saved = readCustom();
+                applyCustomColors(saved);
+                if (customBadge) customBadge.style.display = 'inline-block';
+            } else {
+                if (id !== 'ntd') document.body.classList.add('theme-' + id);
+                // Reset any custom inline overrides by clearing inline vars
+                document.body.style.removeProperty('--accent');
+                document.body.style.removeProperty('--accent-dim');
+                document.body.style.removeProperty('--accent2');
+                document.body.style.removeProperty('--accent2-dim');
+                document.body.style.removeProperty('--bg');
+                document.body.style.removeProperty('--bg-panel');
+                if (customBadge) customBadge.style.display = 'none';
+            }
+            try { localStorage.setItem(STORAGE_KEY_THEME, id); } catch (e) {}
+            if (themeSelect) themeSelect.value = id;
+        }
+
+        function readCustom() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY_CUSTOM);
+                if (raw) return Object.assign({}, DEFAULT_CUSTOM, JSON.parse(raw));
+            } catch (e) {}
+            return Object.assign({}, DEFAULT_CUSTOM);
+        }
+
+        function writeCustom(colors) {
+            try { localStorage.setItem(STORAGE_KEY_CUSTOM, JSON.stringify(colors)); } catch (e) {}
+        }
+
+        function openCustomPanel() {
+            const c = readCustom();
+            customAccent.value  = c.accent;
+            customAccent2.value = c.accent2;
+            customBg.value      = c.bg;
+            customPanel.classList.add('open');
+            customToggleBtn.classList.add('active');
+        }
+        function closeCustomPanel() {
+            customPanel.classList.remove('open');
+            customToggleBtn.classList.remove('active');
+        }
+
+        // Initial theme (synchronous — done in <head> via dataset; here we
+        // promote the pending value to the body class before first paint
+        // actually shows anything that depends on theme).
+        (function initTheme() {
+            const pending = document.documentElement.dataset.themePending || 'ntd';
+            applyTheme(pending);
+        })();
+
+        // Theme select
+        themeSelect.addEventListener('change', () => {
+            const v = themeSelect.value;
+            if (v === 'custom') {
+                openCustomPanel();
+                applyTheme('custom');
+            } else {
+                closeCustomPanel();
+                applyTheme(v);
+            }
+        });
+
+        // Custom panel controls
+        customToggleBtn.addEventListener('click', () => {
+            if (customPanel.classList.contains('open')) {
+                closeCustomPanel();
+            } else {
+                openCustomPanel();
+                applyTheme('custom');
+            }
+        });
+        customCloseBtn.addEventListener('click', closeCustomPanel);
+
+        // Live preview: typing in color input applies immediately
+        function bindColorLive(input, key) {
+            input.addEventListener('input', () => {
+                const c = readCustom();
+                c[key] = input.value;
+                writeCustom(c);
+                applyTheme('custom');
+            });
+        }
+        bindColorLive(customAccent,  'accent');
+        bindColorLive(customAccent2, 'accent2');
+        bindColorLive(customBg,      'bg');
+
+        customResetBtn.addEventListener('click', () => {
+            writeCustom(DEFAULT_CUSTOM);
+            applyTheme('custom');
+            openCustomPanel();   // refresh input values
+        });
+        customSaveBtn.addEventListener('click', () => {
+            closeCustomPanel();
+            showSuccess('Custom theme saved');
+        });
+
+        // ------------------------------------------------------------------ //
+        //  TOASTS (F5/F6)                                                     //
+        // ------------------------------------------------------------------ //
+        function showToast(msg, type) {
+            const t = document.createElement('div');
+            t.className = 'toast' + (type ? ' toast-' + type : '');
+            t.textContent = String(msg);
+            toastContainer.appendChild(t);
+            // Force reflow so the slide-in transition runs
+            requestAnimationFrame(() => t.classList.add('toast-in'));
+            setTimeout(() => t.classList.add('toast-out'), 2700);
+            setTimeout(() => { if (t.parentNode) t.parentNode.removeChild(t); }, 3200);
+        }
+        function showError(msg)  { showToast(msg, 'error');   }
+        function showSuccess(msg){ showToast(msg, 'success'); }
+        function showInfo(msg)   { showToast(msg, 'info');    }
+
+        // ------------------------------------------------------------------ //
+        //  State                                                              //
+        // ------------------------------------------------------------------ //
+        let analyzedData = null;
+        let activeSource = null;
+        let lastDownloadFilename = null;
+
+        // ------------------------------------------------------------------ //
+        //  Helpers                                                            //
+        // ------------------------------------------------------------------ //
         function setPreview(html) {
             previewContainer.innerHTML = html;
         }
 
         function formatBytes(bytes) {
-            if (!bytes) return 'N/A';
+            if (!bytes || bytes <= 0) return null;
             const gb = bytes / 1e9;
             if (gb >= 1) return gb.toFixed(1) + ' GB';
-            return (bytes / 1e6).toFixed(0) + ' MB';
+            const mb = bytes / 1e6;
+            if (mb >= 1) return mb.toFixed(0) + ' MB';
+            return (bytes / 1e3).toFixed(0) + ' KB';
+        }
+
+        function sizeLabel(bytes) {
+            // F1: returns "(~250 MB)" / "(size unknown)" string for dropdown
+            const label = formatBytes(bytes);
+            if (label) return ' (~' + label + ')';
+            return ' (size unknown)';
         }
 
         function setButtonsState({ analyzing, downloading, canDownload }) {
@@ -732,36 +1406,52 @@
             completionPanel.style.display   = 'none';
         }
 
-        // Sanitize a message for HTML interpolation. Strips ANSI escape
-        // sequences (which yt-dlp error strings sometimes contain) so
-        // the browser console doesn't render them as color codes.
+        // Sanitize a message for safe display. Strips ANSI escapes.
         function sanitizeMsg(msg) {
             if (!msg) return '';
             return String(msg).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
         }
 
-        function showError(msg) {
-            setPreview(`
-                <div style="color: var(--danger); font-family: 'Orbitron', sans-serif; font-size: 1.2rem;">
-                    SIGNAL LOST
-                </div>
-                <p style="color: var(--text-dim); margin-top: 10px;">${sanitizeMsg(msg)}</p>
-            `);
-        }
+        // ------------------------------------------------------------------ //
+        //  KEYBOARD SHORTCUTS (F4)                                            //
+        // ------------------------------------------------------------------ //
+        // Enter in URL input → analyze
+        urlInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                analyzeBtn.click();
+            }
+        });
 
-        // ------------------------------------------------------------------------- //
-        // Analyze
-        // ------------------------------------------------------------------------- //
+        // Cmd+V / Ctrl+V anywhere → if clipboard has http(s) URL, paste + analyze
+        document.addEventListener('paste', (e) => {
+            // Skip if user is pasting into a form field (let it go naturally)
+            const t = e.target;
+            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
+                return;
+            }
+            const text = (e.clipboardData || window.clipboardData).getData('text');
+            const trimmed = (text || '').trim();
+            if (/^https?:\/\/[^\s]+$/i.test(trimmed)) {
+                e.preventDefault();
+                urlInput.value = trimmed;
+                analyzeBtn.click();
+            }
+        });
+
+        // ------------------------------------------------------------------ //
+        //  Analyze                                                            //
+        // ------------------------------------------------------------------ //
         analyzeBtn.addEventListener('click', async () => {
             const url = urlInput.value.trim();
             if (!url) {
-                alert('Please enter a valid URL');
+                showError('Please enter a valid URL');
                 return;
             }
 
             resetProgress();
             setButtonsState({ analyzing: true, downloading: false, canDownload: false });
-            setPreview(`<div style="color: var(--cyan); font-family: 'Orbitron', sans-serif;">SCANNING TARGET...</div>`);
+            setPreview(`<div style="color: var(--accent); font-family: 'Orbitron', sans-serif;">SCANNING TARGET...</div>`);
             analyzedData = null;
 
             try {
@@ -772,68 +1462,88 @@
                     throw new Error(data.detail || 'Analysis failed');
                 }
 
+                // Playlist: backend returns {type: "playlist", ...} instead of
+                // {title, thumbnail, ...}. Show a notice; downloads of
+                // individual entries are v0.9.0.
+                if (data.type === 'playlist') {
+                    setPreview(`
+                        <div style="color: var(--accent); font-family: 'Orbitron', sans-serif; font-size: 1.1rem;">
+                            PLAYLIST DETECTED
+                        </div>
+                        <p style="color: var(--text); margin-top: 6px; font-size: 0.85rem;">
+                            ${sanitizeMsg(data.title || 'Untitled playlist')}
+                        </p>
+                        <p style="color: var(--text-dim); margin-top: 12px; font-size: 0.8rem;">
+                            ${data.count || (data.entries || []).length} entries — individual download coming in v0.9.0
+                        </p>
+                    `);
+                    setButtonsState({ analyzing: false, downloading: false, canDownload: false });
+                    return;
+                }
+
                 analyzedData = data;
 
-                // Thumbnail
                 const thumbHtml = data.thumbnail
                     ? `<img class="preview-image" src="${data.thumbnail}" alt="thumbnail">`
                     : '';
 
                 setPreview(`
                     ${thumbHtml}
-                    <div style="color: var(--cyan); font-family: 'Orbitron', sans-serif; font-size: 1.1rem; margin-top: 12px;">
+                    <div style="color: var(--accent); font-family: 'Orbitron', sans-serif; font-size: 1.1rem; margin-top: 12px;">
                         SIGNAL LOCKED
                     </div>
-                    <p style="color: var(--text); margin-top: 6px; font-size: 0.85rem;">${data.title}</p>
+                    <p style="color: var(--text); margin-top: 6px; font-size: 0.85rem;">${sanitizeMsg(data.title || '')}</p>
                 `);
 
-                // Stats
-                document.getElementById('videoRes').textContent     = data.resolution;
-                document.getElementById('videoDuration').textContent = data.duration;
-                document.getElementById('videoSize').textContent    = formatBytes(data.filesize);
+                document.getElementById('videoRes').textContent      = data.resolution || '--';
+                document.getElementById('videoDuration').textContent = data.duration   || '--';
+                document.getElementById('videoSize').textContent     = formatBytes(data.filesize) || '--';
                 previewStats.style.display = 'grid';
 
-                // Populate format dropdown using server-reported available qualities
-                const av = data.available || {};
-                const heights = av.video_heights || [];
-                const bitrates = av.audio_bitrates || [];
-                const hasVideo = heights.length > 0;
-                const hasAudio = av.audio;
+                // Build format options. F1: include estimated size in label.
+                const av        = data.available || {};
+                const formats   = data.formats   || [];
+                const heights   = av.video_heights || [];
+                const bitrates  = av.audio_bitrates || [];
+                const hasAudio  = av.audio;
 
-                // Build quality optgroups. value is "fmt|q" — sent to backend.
+                // Build lookup of format_id -> filesize + resolution
+                const fmtById = {};
+                formats.forEach(f => {
+                    if (f && f.format_id) fmtById[String(f.format_id)] = f;
+                });
+
                 const opts = ['<option value="">-- SELECT FORMAT --</option>'];
-
-                // Best auto
                 opts.push('<option value="best|best">Best Quality (Auto)</option>');
 
-                // MP4 video group
                 if (av.mp4 && heights.length) {
-                    const mp4Opts = heights.map(h =>
-                        `<option value="mp4|${h}">MP4 — ${h}p</option>`
-                    ).join('');
+                    const mp4Opts = heights.map(h => {
+                        // Find the matching format for size estimate
+                        const match = formats.find(f => f.resolution === (h + 'p') && f.ext === 'mp4');
+                        return `<option value="mp4|${h}">MP4 — ${h}p${sizeLabel(match && match.filesize)}</option>`;
+                    }).join('');
                     opts.push(`<optgroup label="MP4 Video">${mp4Opts}</optgroup>`);
                 }
 
-                // WebM video group
                 if (av.webm && heights.length) {
-                    const webmOpts = heights.map(h =>
-                        `<option value="webm|${h}">WebM — ${h}p</option>`
-                    ).join('');
+                    const webmOpts = heights.map(h => {
+                        const match = formats.find(f => f.resolution === (h + 'p') && f.ext === 'webm');
+                        return `<option value="webm|${h}">WebM — ${h}p${sizeLabel(match && match.filesize)}</option>`;
+                    }).join('');
                     opts.push(`<optgroup label="WebM Video">${webmOpts}</optgroup>`);
                 }
 
-                // Audio group (MP3 transcode + original)
                 if (hasAudio) {
                     opts.push(`<optgroup label="Audio (requires FFmpeg for MP3)">`);
                     opts.push(`<option value="audio|best">Original Audio Stream</option>`);
-                    // Show available bitrates, plus standard 320/192/128 fallbacks
                     const seen = new Set();
                     bitrates.forEach(br => {
-                        // Round to standard MP3 bitrates
-                        let std = br >= 320 ? 320 : br >= 192 ? 192 : br >= 128 ? 128 : 96;
+                        const std = br >= 320 ? 320 : br >= 192 ? 192 : br >= 128 ? 128 : 96;
                         if (seen.has(std)) return;
                         seen.add(std);
-                        opts.push(`<option value="mp3|${std}">MP3 — ${std} kbps</option>`);
+                        // Approx ~1 MB per minute at 192 kbps; we don't have
+                        // duration in the format dict, so size unknown.
+                        opts.push(`<option value="mp3|${std}">MP3 — ${std} kbps (size unknown)</option>`);
                     });
                     if (!seen.has(192)) opts.push(`<option value="mp3|192">MP3 — 192 kbps (default)</option>`);
                     if (!seen.has(128)) opts.push(`<option value="mp3|128">MP3 — 128 kbps</option>`);
@@ -842,34 +1552,31 @@
                 }
 
                 formatSelect.innerHTML = opts.join('');
-
                 setButtonsState({ analyzing: false, downloading: false, canDownload: true });
-                downloadBtn.disabled = true;   // force format selection first
+                downloadBtn.disabled   = true;
                 downloadBtn.textContent = 'SELECT FORMAT & INITIALIZE';
 
             } catch (err) {
-                showError(err.message);
+                showError(sanitizeMsg(err.message) || 'Analysis failed');
                 setButtonsState({ analyzing: false, downloading: false, canDownload: false });
             }
         });
 
-        // ------------------------------------------------------------------------- //
-        // Format select – re-enable download once format chosen
-        // ------------------------------------------------------------------------- //
+        // ------------------------------------------------------------------ //
+        //  Format select — re-enable download once format chosen             //
+        // ------------------------------------------------------------------ //
         formatSelect.addEventListener('change', () => {
             downloadBtn.disabled = !analyzedData || !formatSelect.value;
         });
 
-        // ------------------------------------------------------------------------- //
-        // Download
-        // ------------------------------------------------------------------------- //
+        // ------------------------------------------------------------------ //
+        //  Download (SSE)                                                     //
+        // ------------------------------------------------------------------ //
         downloadBtn.addEventListener('click', () => {
             const url  = urlInput.value.trim();
-            // value is "fmt|q" — split into two query params
             const [fmt, q] = (formatSelect.value || 'best|best').split('|');
             if (!url) return;
 
-            // Close any stale EventSource
             if (activeSource) {
                 activeSource.close();
                 activeSource = null;
@@ -890,7 +1597,7 @@
                 if (d.status === 'error') {
                     activeSource.close();
                     activeSource = null;
-                    showError(d.error || 'Download error');
+                    showError(sanitizeMsg(d.error) || 'Download error');
                     setButtonsState({ analyzing: false, downloading: false, canDownload: true });
                     return;
                 }
@@ -905,7 +1612,10 @@
                     const pct = Math.min(100, Math.round((d.downloaded_bytes / d.total_bytes) * 100)) || 0;
                     progressFill.style.width    = pct + '%';
                     progressPercent.textContent = d._percent_str || pct + '%';
-                    progressText.textContent    = d._speed_str || 'DOWNLOADING...';
+                    // F2: include ETA alongside speed
+                    const speed = d._speed_str || '';
+                    const eta   = d._eta_str   ? '  ETA ' + d._eta_str : '';
+                    progressText.textContent = speed + eta;
                 }
 
                 if (d.status === 'done') {
@@ -915,8 +1625,6 @@
                     progressFill.style.width = '100%';
                     progressPercent.textContent = '100%';
                     completionPanel.style.display = 'block';
-                    // Pull filename from latest progress event so we can link to it
-                    // yt-dlp reports the path; grab just the basename.
                     const lastFilename = (d.filename || '').split(/[\\/]/).pop();
                     lastDownloadFilename = lastFilename || null;
                     showDownloadLink(lastFilename);
@@ -928,50 +1636,44 @@
             };
 
             activeSource.onerror = () => {
-                activeSource.close();
+                if (activeSource) activeSource.close();
                 activeSource = null;
                 showError('Connection lost during download');
                 setButtonsState({ analyzing: false, downloading: false, canDownload: true });
             };
         });
 
-        // Celebration Animation
+        // ------------------------------------------------------------------ //
+        //  Celebration Animation                                              //
+        // ------------------------------------------------------------------ //
         function triggerCelebration() {
             celebrationOverlay.classList.add('active');
-
-            for (let i = 0; i < 50; i++) {
-                createParticle();
-            }
-
-            setTimeout(() => {
-                celebrationOverlay.classList.remove('active');
-            }, 2000);
+            for (let i = 0; i < 50; i++) createParticle();
+            setTimeout(() => celebrationOverlay.classList.remove('active'), 2000);
         }
 
         function createParticle() {
             const particle = document.createElement('div');
             particle.className = 'particle';
-
             particle.style.left = Math.random() * 100 + 'vw';
-            particle.style.top = Math.random() * 100 + 'vh';
-            particle.style.background = Math.random() > 0.5 ? 'var(--cyan)' : 'var(--pink)';
+            particle.style.top  = Math.random() * 100 + 'vh';
+            const useAccent = Math.random() > 0.5;
+            particle.style.background = useAccent ? 'var(--accent)' : 'var(--accent2)';
             particle.style.boxShadow  = `0 0 10px ${particle.style.background}`;
 
-            const angle   = Math.random() * Math.PI * 2;
+            const angle    = Math.random() * Math.PI * 2;
             const distance = 100 + Math.random() * 200;
             particle.style.setProperty('--tx', Math.cos(angle) * distance + 'px');
             particle.style.setProperty('--ty', Math.sin(angle) * distance + 'px');
-            particle.style.animation        = `particleExplode ${0.5 + Math.random() * 0.5}s ease-out forwards`;
-            particle.style.animationDelay   = Math.random() * 0.3 + 's';
-
+            particle.style.animation      = `particleExplode ${0.5 + Math.random() * 0.5}s ease-out forwards`;
+            particle.style.animationDelay = Math.random() * 0.3 + 's';
             celebrationOverlay.appendChild(particle);
-
-            setTimeout(() => { particle.remove(); }, 2000);
+            setTimeout(() => { if (particle.parentNode) particle.parentNode.removeChild(particle); }, 2000);
         }
 
-        // ------------------------------------------------------------------------- //
-        // File list + download link
-        // ------------------------------------------------------------------------- //
+        // ------------------------------------------------------------------ //
+        //  File list + download link + open folder (F8)                      //
+        // ------------------------------------------------------------------ //
         async function loadFiles() {
             const list = document.getElementById('filesList');
             try {
@@ -988,7 +1690,7 @@
                     const date = new Date(f.modified * 1000).toLocaleString();
                     const safeName = f.name.replace(/[<>"&]/g, c => ({ '<': '&lt;', '>': '&gt;', '"': '&quot;', '&': '&amp;' }[c]));
                     return `
-                        <div style="display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--cyan-dim);">
+                        <div style="display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--accent-dim);">
                             <span style="flex: 1; color: var(--text); font-family: 'Share Tech Mono', monospace; word-break: break-all;">${safeName}</span>
                             <span style="color: var(--text-dim); font-size: 0.75rem;">${sizeLabel}</span>
                             <a class="btn" style="padding: 6px 16px; font-size: 0.75rem; text-decoration: none;" href="/api/files/${encodeURIComponent(f.name)}" download>SAVE</a>
@@ -1000,9 +1702,31 @@
             }
         }
 
-        function showDownloadLink(filename) {
-            const link = document.getElementById('downloadLink');
-            const form = document.getElementById('tagForm');
+        // F8: open folder button — calls /api/folder and shows toast with path
+        openFolderBtn.addEventListener('click', async () => {
+            try {
+                const r = await fetch('/api/folder');
+                if (!r.ok) {
+                    const data = await r.json().catch(() => ({}));
+                    throw new Error(data.detail || 'Folder endpoint failed');
+                }
+                const data = await r.json();
+                const path = data.path || '(unknown)';
+                // Try to copy the path to clipboard as a convenience.
+                try {
+                    await navigator.clipboard.writeText(path);
+                    showSuccess('Path copied to clipboard: ' + path);
+                } catch (e) {
+                    showInfo('Downloads folder: ' + path);
+                }
+            } catch (err) {
+                showError(sanitizeMsg(err.message) || 'Could not retrieve folder path');
+            }
+        });
+
+        async function showDownloadLink(filename) {
+            const link  = document.getElementById('downloadLink');
+            const form  = document.getElementById('tagForm');
             const status = document.getElementById('tagStatus');
             if (!filename) {
                 link.innerHTML = '';
@@ -1010,8 +1734,9 @@
                 return;
             }
             const safe = filename.replace(/[<>"&]/g, c => ({ '<': '&lt;', '>': '&gt;', '"': '&quot;', '&': '&amp;' }[c]));
+            // F7: drop emoji from save button
             link.innerHTML = `
-                <a class="btn" style="display: inline-block; text-decoration: none;" href="/api/files/${encodeURIComponent(filename)}" download>💾 SAVE TO MY DEVICE</a>
+                <a class="btn" style="display: inline-block; text-decoration: none;" href="/api/files/${encodeURIComponent(filename)}" download>SAVE TO DEVICE</a>
                 <div style="color: var(--text-dim); margin-top: 10px; font-size: 0.8rem; word-break: break-all;">${safe}</div>
             `;
             // Show tag form only for audio files
@@ -1019,18 +1744,36 @@
                 const isAudio = /\.(mp3|m4a|flac|ogg)$/i.test(filename);
                 form.style.display = isAudio ? 'block' : 'none';
                 if (isAudio) {
-                    document.getElementById('tagArtist').value = '';
-                    document.getElementById('tagAlbum').value  = '';
-                    document.getElementById('tagYear').value   = '';
-                    document.getElementById('tagGenre').value  = '';
+                    // F12: prefill from existing tags via /api/tag GET
+                    const artistEl = document.getElementById('tagArtist');
+                    const albumEl  = document.getElementById('tagAlbum');
+                    const yearEl   = document.getElementById('tagYear');
+                    const genreEl  = document.getElementById('tagGenre');
+                    artistEl.value = '';
+                    albumEl.value  = '';
+                    yearEl.value   = '';
+                    genreEl.value  = '';
                     if (status) status.textContent = '';
+                    try {
+                        const r = await fetch('/api/tag?filename=' + encodeURIComponent(filename));
+                        if (r.ok) {
+                            const data = await r.json();
+                            const tags = (data && data.tags) || {};
+                            if (tags.artist) artistEl.value = tags.artist;
+                            if (tags.album)  albumEl.value  = tags.album;
+                            if (tags.year)   yearEl.value   = tags.year;
+                            if (tags.genre)  genreEl.value  = tags.genre;
+                        }
+                    } catch (e) {
+                        // Endpoint not reachable or failed; leave inputs empty.
+                    }
                 }
             }
         }
 
-        // ------------------------------------------------------------------------- //
-        // Apply ID3 tags
-        // ------------------------------------------------------------------------- //
+        // ------------------------------------------------------------------ //
+        //  Apply ID3 tags                                                     //
+        // ------------------------------------------------------------------ //
         document.getElementById('applyTagBtn').addEventListener('click', async () => {
             const filename = lastDownloadFilename;
             if (!filename) return;
@@ -1043,9 +1786,9 @@
                 genre:  document.getElementById('tagGenre').value.trim()  || undefined,
             };
 
-            const btn = document.getElementById('applyTagBtn');
+            const btn    = document.getElementById('applyTagBtn');
             const status = document.getElementById('tagStatus');
-            btn.disabled = true;
+            btn.disabled   = true;
             btn.textContent = 'APPLYING...';
             status.textContent = '';
 
@@ -1059,17 +1802,21 @@
                 if (!r.ok) throw new Error(data.detail || 'Tagging failed');
                 status.style.color = 'var(--success)';
                 status.textContent = '✓ Tags applied: ' + Object.keys(data.tags).join(', ');
-                loadFiles();  // refresh list (mtime changed)
+                showSuccess('Tags applied to ' + filename);
+                loadFiles();
             } catch (err) {
                 status.style.color = 'var(--danger)';
                 status.textContent = '✗ ' + sanitizeMsg(err.message);
+                showError(sanitizeMsg(err.message) || 'Tagging failed');
             } finally {
-                btn.disabled = false;
+                btn.disabled   = false;
                 btn.textContent = 'APPLY TAGS';
             }
         });
 
-        // Initial load + refresh after every download
+        // ------------------------------------------------------------------ //
+        //  Init                                                               //
+        // ------------------------------------------------------------------ //
         loadFiles();
 
         // Display server version in header
@@ -1078,12 +1825,25 @@
                 const r = await fetch('/api/health');
                 const data = await r.json();
                 if (data.version) {
-                    document.getElementById('versionBadge').textContent = 'v' + data.version;
+                    document.getElementById('versionBadge').firstChild.textContent = 'v' + data.version;
                 }
             } catch (e) {
                 // Server not reachable, leave default
             }
         })();
+
+        // Remove boot overlay after the CSS animation finishes (defensive —
+        // if the animation is somehow disabled, this still clears it after
+        // 1.3s). Set inline `visibility: hidden` so it's removed from the
+        // accessibility tree.
+        setTimeout(() => {
+            const o = document.getElementById('bootOverlay');
+            if (o && o.parentNode) {
+                o.style.visibility = 'hidden';
+                // Remove from DOM a beat later for cleanliness
+                setTimeout(() => { if (o && o.parentNode) o.parentNode.removeChild(o); }, 200);
+            }
+        }, 1400);
     </script>
 </body>
 </html>
