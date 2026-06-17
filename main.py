@@ -44,6 +44,23 @@ DOWNLOADS  = APP_DIR / 'downloads'
 DOWNLOADS.mkdir(exist_ok=True)
 
 # --------------------------------------------------------------------------- #
+# URL validation
+# --------------------------------------------------------------------------- #
+# Reject empty strings, javascript:, file://, garbage input before yt-dlp
+# gets a chance to crash on it. Must be a non-empty http(s) URL with no
+# whitespace.
+URL_PATTERN = re.compile(r"^https?://[^\s]+$")
+
+
+def _validate_url(url: str) -> None:
+    """Raise HTTPException(400) if the URL is not a non-empty http(s) URL."""
+    if not url or not URL_PATTERN.match(url):
+        raise HTTPException(
+            status_code=400,
+            detail="URL must start with http:// or https://",
+        )
+
+# --------------------------------------------------------------------------- #
 # FFmpeg detection — check frozen _MEIPASS first, then system PATH, then
 # imageio-ffmpeg's cached path (broken in frozen), then Windows fallbacks.
 # --------------------------------------------------------------------------- #
@@ -160,8 +177,9 @@ async def health():
 # --------------------------------------------------------------------------- #
 @app.get("/api/info")
 async def info(url: str):
-    if not url:
-        raise HTTPException(status_code=400, detail="url query parameter is required")
+    # B4: URL pre-check — reject empty / javascript: / file:// / garbage
+    # before yt-dlp gets to it.
+    _validate_url(url)
 
     ydl_opts = {
         "quiet": True,
@@ -178,6 +196,29 @@ async def info(url: str):
 
         if raw is None:
             raise HTTPException(status_code=422, detail="Could not extract video info")
+
+        # B3: playlist detection — return a different shape for playlists
+        # so the frontend can show a friendly "this is a playlist" message.
+        # Downloading individual playlist entries is a v0.9.0 feature.
+        raw_type = raw.get("_type")
+        entries = raw.get("entries")
+        if raw_type == "playlist" or (isinstance(entries, list) and len(entries) > 0):
+            entries_list = entries if isinstance(entries, list) else []
+            return {
+                "type":    "playlist",
+                "title":   raw.get("title", "Playlist"),
+                "entries": [
+                    {
+                        "title":    e.get("title") if isinstance(e, dict) else None,
+                        "url":      (e.get("url") or e.get("webpage_url")) if isinstance(e, dict) else None,
+                        "duration": e.get("duration") if isinstance(e, dict) else None,
+                        "id":       e.get("id") if isinstance(e, dict) else None,
+                    }
+                    for e in entries_list[:50]
+                    if isinstance(e, dict)
+                ],
+                "count":   len(entries_list),
+            }
 
         # Project to the fields the frontend needs.
         # Handle both single-video and playlist-entry dicts.
@@ -218,6 +259,17 @@ async def info(url: str):
             m, s = divmod(rem, 60)
             return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
+        # B2: audio-only detection. Combined formats (vcodec + acodec)
+        # are pre-merged; only count true audio-only streams for has_audio
+        # and audio_bitrates. Combined formats with audio track should NOT
+        # make the dropdown think "audio extraction is available" — the
+        # downloader handles the merge internally.
+        def _is_audio_only(f):
+            return f.get("acodec") not in (None, "none") and f.get("vcodec") in (None, "none")
+
+        def _is_video_only(f):
+            return f.get("vcodec") not in (None, "none") and (f.get("acodec") in (None, "none"))
+
         # Compute available qualities for the frontend dropdown
         video_heights = sorted({
             f.get("height") for f in formats
@@ -225,11 +277,11 @@ async def info(url: str):
         }, reverse=True)
         audio_bitrates = sorted({
             int(f.get("abr") or 0) for f in formats
-            if f.get("acodec") not in (None, "none") and (f.get("abr") or 0) > 0
+            if _is_audio_only(f) and (f.get("abr") or 0) > 0
         }, reverse=True)
         has_mp4 = any(f.get("ext") == "mp4" and f.get("vcodec") not in (None, "none") for f in formats)
         has_webm = any(f.get("ext") == "webm" and f.get("vcodec") not in (None, "none") for f in formats)
-        has_audio = any(f.get("acodec") not in (None, "none") and f.get("vcodec") in (None, "none") for f in formats)
+        has_audio = any(_is_audio_only(f) for f in formats)
 
         return {
             "title":      raw.get("title", "Unknown"),
@@ -244,6 +296,8 @@ async def info(url: str):
                 "video_heights":  video_heights,
                 "audio_bitrates": audio_bitrates,
             },
+            # B1: per-format filesize + tbr so the frontend can show
+            # "MP4 — 1080p (~250 MB)" labels in the format picker.
             "formats": [
                 {
                     "format_id": f["format_id"],
@@ -251,6 +305,8 @@ async def info(url: str):
                     "resolution": resolution_label(f),
                     "vcodec":    f.get("vcodec", "none"),
                     "acodec":    f.get("acodec", "none"),
+                    "filesize":  f.get("filesize") or f.get("filesize_approx") or 0,
+                    "tbr":       f.get("tbr") or 0,
                 }
                 for f in formats
                 if f.get("format_id")
@@ -262,6 +318,10 @@ async def info(url: str):
         msg = str(e).strip()
         msg = re.sub(r"^ERROR:\s*\[[^\]]+\]\s*", "", msg)
         raise HTTPException(status_code=422, detail=msg or "Download error")
+    except HTTPException:
+        # Re-raise FastAPI's own HTTPException (e.g. from _validate_url) so
+        # the global 500 fallback below doesn't swallow the original status.
+        raise
     except Exception as e:
         msg = str(e).strip()
         msg = re.sub(r"^ERROR:\s*\[[^\]]+\]\s*", "", msg)
@@ -273,8 +333,8 @@ async def info(url: str):
 # --------------------------------------------------------------------------- #
 @app.get("/api/download")
 async def download(url: str, request: Request, fmt: str = "best", q: str = "best"):
-    if not url:
-        raise HTTPException(status_code=400, detail="url query parameter is required")
+    # B4: URL pre-check — same validation as /api/info.
+    _validate_url(url)
 
     # Concurrent download guard
     if download_lock.locked():
@@ -436,7 +496,7 @@ async def get_file(filename: str):
 
 
 # --------------------------------------------------------------------------- #
-# /api/tag – write ID3 metadata to an MP3
+# /api/tag – read + write ID3 metadata for an audio file
 # --------------------------------------------------------------------------- #
 class TagRequest(BaseModel):
     filename: str
@@ -447,16 +507,62 @@ class TagRequest(BaseModel):
     genre:    str | None = None
 
 
-@app.post("/api/tag")
-async def tag_file(req: TagRequest):
-    if not req.filename:
-        raise HTTPException(status_code=400, detail="filename is required")
-    if "/" in req.filename or "\\" in req.filename or ".." in req.filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
+def _validate_tag_filename(filename: str) -> Path:
+    """Validate the filename and return the resolved path inside DOWNLOADS.
 
-    file_path = DOWNLOADS / req.filename
+    Rejects path traversal (slashes, parent refs) and 404s on missing files.
+    """
+    if not filename:
+        raise HTTPException(status_code=400, detail="filename is required")
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    file_path = DOWNLOADS / filename
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
+    return file_path
+
+
+# B7: GET /api/tag?filename=<name> — return existing ID3 tags so the
+# frontend can prefill the re-tag form (F12). Non-audio files or files
+# without tags return `{"tags": {}}`.
+@app.get("/api/tag")
+async def get_tag(filename: str):
+    file_path = _validate_tag_filename(filename)
+
+    # Non-MP3 audio / non-audio files: no ID3 tags to read.
+    # We use mutagen.id3 per spec; the POST handler also writes ID3 only,
+    # so MP3 is the only format with persistent tags in this app.
+    if file_path.suffix.lower() != ".mp3":
+        return {"filename": filename, "tags": {}}
+
+    try:
+        from mutagen.id3 import ID3, ID3NoHeaderError
+    except ImportError:
+        raise HTTPException(status_code=500, detail="mutagen not installed")
+
+    try:
+        try:
+            audio = ID3(str(file_path))
+        except ID3NoHeaderError:
+            return {"filename": filename, "tags": {}}
+
+        tags = {}
+        if "TIT2" in audio: tags["title"]  = str(audio["TIT2"])
+        if "TPE1" in audio: tags["artist"] = str(audio["TPE1"])
+        if "TALB" in audio: tags["album"]  = str(audio["TALB"])
+        if "TDRC" in audio: tags["year"]   = str(audio["TDRC"])
+        if "TCON" in audio: tags["genre"]  = str(audio["TCON"])
+
+        return {"filename": filename, "tags": tags}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read tags: {e}")
+
+
+@app.post("/api/tag")
+async def tag_file(req: TagRequest):
+    file_path = _validate_tag_filename(req.filename)
 
     if file_path.suffix.lower() not in (".mp3", ".m4a", ".flac", ".ogg"):
         raise HTTPException(
