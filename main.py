@@ -24,7 +24,7 @@ from pydantic import BaseModel
 #   MINOR — new feature
 #   PATCH — bug fix / polish
 # The CI workflow reads this and stamps it onto artifact + exe metadata.
-__version__ = "0.7.1"
+__version__ = "0.7.2"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -44,15 +44,28 @@ DOWNLOADS  = APP_DIR / 'downloads'
 DOWNLOADS.mkdir(exist_ok=True)
 
 # --------------------------------------------------------------------------- #
-# FFmpeg detection — check system PATH first, then bundled (imageio-ffmpeg)
+# FFmpeg detection — check frozen _MEIPASS first, then system PATH, then
+# imageio-ffmpeg's cached path (broken in frozen), then Windows fallbacks.
 # --------------------------------------------------------------------------- #
 def find_ffmpeg() -> str | None:
     """Return the path to ffmpeg, or None if not found."""
+    # 0. Frozen exe (PyInstaller one-dir): ffmpeg.exe is bundled at
+    #    sys._MEIPASS/ffmpeg.exe (i.e. next to the .exe in _internal/).
+    #    The imageio-ffmpeg cached path points to the build machine and
+    #    does not exist on the user's machine, so we must check _MEIPASS
+    #    first.
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            for name in ("ffmpeg.exe", "ffmpeg"):
+                candidate = Path(meipass) / name
+                if candidate.exists() and candidate.stat().st_size > 1_000_000:
+                    return str(candidate)
     # 1. System PATH
     path = shutil.which("ffmpeg")
     if path:
         return path
-    # 2. Bundled ffmpeg from imageio-ffmpeg (PyInstaller bundles this)
+    # 2. Bundled ffmpeg from imageio-ffmpeg (works in dev, broken in frozen)
     try:
         import imageio_ffmpeg
         bundled = imageio_ffmpeg.get_ffmpeg_exe()
