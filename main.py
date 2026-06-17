@@ -2,6 +2,7 @@
 yt-dlp Gundam Dashboard - FastAPI Backend
 """
 import asyncio
+import io
 import json
 import os
 import re
@@ -23,7 +24,7 @@ from pydantic import BaseModel
 #   MINOR — new feature
 #   PATCH — bug fix / polish
 # The CI workflow reads this and stamps it onto artifact + exe metadata.
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -492,6 +493,23 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     is_frozen = getattr(sys, "frozen", False)
 
+    # Windows frozen exe (PyInstaller `console=False`) starts with
+    # `sys.stdout` / `sys.stderr` set to None on some Python/PyInstaller
+    # combinations. Uvicorn's default `ColourizedFormatter.__init__` calls
+    # `sys.stdout.isatty()` when initializing, which crashes with
+    #     AttributeError: 'NoneType' object has no attribute 'isatty'
+    # leading to
+    #     ValueError: Unable to configure formatter 'default'
+    # In dev mode (non-frozen), sys.stdout/stderr are real streams and
+    # we keep the normal print() output. In frozen mode, we replace them
+    # with an in-memory stream whose `isatty()` returns False — same
+    # effect for uvicorn, but the user's dashboard + tray icon still work
+    # as the only UI surfaces.
+    if is_frozen and (sys.stdout is None or not hasattr(sys.stdout, "isatty")):
+        sys.stdout = io.StringIO()
+    if is_frozen and (sys.stderr is None or not hasattr(sys.stderr, "isatty")):
+        sys.stderr = io.StringIO()
+
     def open_browser_when_ready(url: str, delay: float = 1.5):
         """Wait for uvicorn to bind, then open the dashboard in the user's
         default browser. Daemon thread so it doesn't block process exit."""
@@ -528,12 +546,16 @@ if __name__ == "__main__":
         stop_event = None
 
     # reload=True only works in dev (non-frozen). Frozen exe must not reload.
+    # `use_colors=False` is belt-and-suspenders for the stdout/stderr
+    # redirect above — even if a future uvicorn version checks isatty()
+    # elsewhere, this guarantees the formatter stays color-free.
     try:
         uvicorn.run(
             "__main__:app",
             host="0.0.0.0",
             port=port,
             reload=not is_frozen,
+            use_colors=False,
         )
     except KeyboardInterrupt:
         pass
