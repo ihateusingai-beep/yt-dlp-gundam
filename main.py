@@ -1,13 +1,18 @@
 """
 yt-dlp Gundam Dashboard - FastAPI Backend
+
+v0.8.1 — refactored helpers into focused modules:
+  formats.py — format classification, projection, yt-dlp selector
+  paths.py   — frozen-vs-dev path layout
+  media.py   — FFmpeg detection, version, source label
+  tags.py    — ID3 read/write
+This file stays focused on the FastAPI surface and the download pipeline.
 """
 import asyncio
 import io
 import json
 import os
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -16,32 +21,31 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
+from formats import (
+    available_qualities,
+    best_video_format,
+    build_format_selector,
+    duration_str,
+    filesize_of,
+    is_audio_extract,
+    resolution_label,
+)
+from media import FFMPEG_PATH, ffmpeg_source_label, get_ffmpeg_version
+from paths import APP_DIR, BASE_DIR, DOWNLOADS, TEMPLATES, init_downloads_dir
+from tags import read_id3, write_id3
+
 # --------------------------------------------------------------------------- #
 # Versioning
 # --------------------------------------------------------------------------- #
 # Bump this every time you ship a meaningful change. SemVer:
 #   MAJOR — breaking UX change
 #   MINOR — new feature
-#   PATCH — bug fix / polish
+#   PATCH — bug fix / polish / refactor
 # The CI workflow reads this and stamps it onto artifact + exe metadata.
-__version__ = "0.8.0"
+__version__ = "0.8.1"
 
-# --------------------------------------------------------------------------- #
-# Paths
-# --------------------------------------------------------------------------- #
-# Frozen (PyInstaller): executable lives in dist/yt_dlp_gundam/yt_dlp_gundam.exe
-# downloads/ goes next to the .exe so users can find their files.
-if getattr(sys, 'frozen', False):
-    # sys.executable is <dist>/yt_dlp_gundam/yt_dlp_gundam.exe
-    APP_DIR   = Path(sys.executable).parent.resolve()
-    TEMPLATES = Path(sys._MEIPASS) / 'templates'
-else:
-    APP_DIR   = Path(__file__).parent.resolve()
-    TEMPLATES = APP_DIR / 'templates'
-
-BASE_DIR   = APP_DIR
-DOWNLOADS  = APP_DIR / 'downloads'
-DOWNLOADS.mkdir(exist_ok=True)
+# Ensure DOWNLOADS exists on startup. Idempotent.
+init_downloads_dir()
 
 # --------------------------------------------------------------------------- #
 # URL validation
@@ -61,70 +65,12 @@ def _validate_url(url: str) -> None:
         )
 
 # --------------------------------------------------------------------------- #
-# FFmpeg detection — check frozen _MEIPASS first, then system PATH, then
-# imageio-ffmpeg's cached path (broken in frozen), then Windows fallbacks.
-# --------------------------------------------------------------------------- #
-def find_ffmpeg() -> str | None:
-    """Return the path to ffmpeg, or None if not found."""
-    # 0. Frozen exe (PyInstaller one-dir): ffmpeg.exe is bundled at
-    #    sys._MEIPASS/ffmpeg.exe (i.e. next to the .exe in _internal/).
-    #    The imageio-ffmpeg cached path points to the build machine and
-    #    does not exist on the user's machine, so we must check _MEIPASS
-    #    first.
-    if getattr(sys, "frozen", False):
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            for name in ("ffmpeg.exe", "ffmpeg"):
-                candidate = Path(meipass) / name
-                if candidate.exists() and candidate.stat().st_size > 1_000_000:
-                    return str(candidate)
-    # 1. System PATH
-    path = shutil.which("ffmpeg")
-    if path:
-        return path
-    # 2. Bundled ffmpeg from imageio-ffmpeg (works in dev, broken in frozen)
-    try:
-        import imageio_ffmpeg
-        bundled = imageio_ffmpeg.get_ffmpeg_exe()
-        if bundled and Path(bundled).exists():
-            return bundled
-    except ImportError:
-        pass
-    # 3. Windows fallback – search common install locations
-    for candidate in [
-        Path("C:/ffmpeg/bin/ffmpeg.exe"),
-        Path("C:/Program Files/ffmpeg/bin/ffmpeg.exe"),
-        Path("C:/Program Files (x86)/ffmpeg/bin/ffmpeg.exe"),
-    ]:
-        if candidate.exists():
-            return str(candidate)
-    return None
-
-FFMPEG_PATH = find_ffmpeg()
-
-# --------------------------------------------------------------------------- #
 # FastAPI app
 # --------------------------------------------------------------------------- #
 app = FastAPI(title="yt-dlp Gundam Dashboard", version=__version__)
 
 # Per-host download lock so we can't have two downloads racing.
 download_lock = asyncio.Lock()
-
-# --------------------------------------------------------------------------- #
-# Helpers
-# --------------------------------------------------------------------------- #
-def get_ffmpeg_version() -> str:
-    if not FFMPEG_PATH:
-        return "not found"
-    try:
-        result = subprocess.run(
-            [FFMPEG_PATH, "-version"],
-            capture_output=True, text=True, timeout=10,
-        )
-        first_line = result.stdout.splitlines()[0] if result.stdout else "unknown"
-        return first_line
-    except Exception:
-        return "error"
 
 # Log on startup (after app is created so logs are visible)
 print(f"[health] FFmpeg {'found: ' + FFMPEG_PATH + ' (' + get_ffmpeg_version() + ')' if FFMPEG_PATH else 'NOT found – some features may be limited'}")
@@ -144,22 +90,12 @@ async def index():
 # --------------------------------------------------------------------------- #
 @app.get("/api/health")
 async def health():
-    # Identify ffmpeg source for the user
-    ffmpeg_source = "missing"
-    if FFMPEG_PATH:
-        try:
-            if "imageio" in FFMPEG_PATH.lower() or "site-packages" in FFMPEG_PATH:
-                ffmpeg_source = "bundled"
-            else:
-                ffmpeg_source = "system"
-        except Exception:
-            ffmpeg_source = "unknown"
     return {
         "status": "ok",
         "version": __version__,
         "ffmpeg": {
             "path": FFMPEG_PATH,
-            "source": ffmpeg_source,
+            "source": ffmpeg_source_label(FFMPEG_PATH) if FFMPEG_PATH else "missing",
             "version": get_ffmpeg_version(),
         },
         "python": sys.version,
@@ -218,79 +154,15 @@ async def info(url: str):
         # Project to the fields the frontend needs.
         # Handle both single-video and playlist-entry dicts.
         formats = raw.get("formats") or []
-
-        # Pick the highest-quality video format (max height → max tbr).
-        # Don't require both vcodec and acodec — combined formats are
-        # pre-merged; many videos only have separate streams.
-        def _sort_key(f):
-            h = f.get("height") or 0
-            tbr = f.get("tbr") or 0
-            return (h, tbr)
-
-        best_video = max(
-            (f for f in formats if f.get("vcodec") and f.get("vcodec") != "none"),
-            key=_sort_key,
-            default={},
-        )
-
-        def fmt_filesize(f):
-            fs = f.get("filesize") or f.get("filesize_approx") or 0
-            return fs
-
-        def resolution_label(f):
-            h = f.get("height")
-            if h:
-                return f"{h}p"
-            note = f.get("format_note")
-            if note:
-                return note
-            w = f.get("width")
-            return f"{w}x{f.get('height')}" if w else "N/A"
-
-        def duration_str(seconds):
-            if not seconds:
-                return "N/A"
-            h, rem = divmod(int(seconds), 3600)
-            m, s = divmod(rem, 60)
-            return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
-
-        # B2: audio-only detection. Combined formats (vcodec + acodec)
-        # are pre-merged; only count true audio-only streams for has_audio
-        # and audio_bitrates. Combined formats with audio track should NOT
-        # make the dropdown think "audio extraction is available" — the
-        # downloader handles the merge internally.
-        def _is_audio_only(f):
-            return f.get("acodec") not in (None, "none") and f.get("vcodec") in (None, "none")
-
-        def _is_video_only(f):
-            return f.get("vcodec") not in (None, "none") and (f.get("acodec") in (None, "none"))
-
-        # Compute available qualities for the frontend dropdown
-        video_heights = sorted({
-            f.get("height") for f in formats
-            if f.get("height") and f.get("vcodec") not in (None, "none")
-        }, reverse=True)
-        audio_bitrates = sorted({
-            int(f.get("abr") or 0) for f in formats
-            if _is_audio_only(f) and (f.get("abr") or 0) > 0
-        }, reverse=True)
-        has_mp4 = any(f.get("ext") == "mp4" and f.get("vcodec") not in (None, "none") for f in formats)
-        has_webm = any(f.get("ext") == "webm" and f.get("vcodec") not in (None, "none") for f in formats)
-        has_audio = any(_is_audio_only(f) for f in formats)
+        best_video = best_video_format(formats)
 
         return {
             "title":      raw.get("title", "Unknown"),
             "thumbnail":  raw.get("thumbnail", ""),
             "duration":   duration_str(raw.get("duration")),
             "resolution": resolution_label(best_video),
-            "filesize":   fmt_filesize(best_video),
-            "available": {
-                "mp4":       has_mp4,
-                "webm":      has_webm,
-                "audio":     has_audio,
-                "video_heights":  video_heights,
-                "audio_bitrates": audio_bitrates,
-            },
+            "filesize":   filesize_of(best_video),
+            "available":  available_qualities(formats),
             # B1: per-format filesize + tbr so the frontend can show
             # "MP4 — 1080p (~250 MB)" labels in the format picker.
             "formats": [
@@ -300,7 +172,7 @@ async def info(url: str):
                     "resolution": resolution_label(f),
                     "vcodec":    f.get("vcodec", "none"),
                     "acodec":    f.get("acodec", "none"),
-                    "filesize":  f.get("filesize") or f.get("filesize_approx") or 0,
+                    "filesize":  filesize_of(f),
                     "tbr":       f.get("tbr") or 0,
                 }
                 for f in formats
@@ -365,33 +237,8 @@ async def download(url: str, request: Request, fmt: str = "best", q: str = "best
     # further refines the selector: video heights (480/720/1080/2160) or
     # audio bitrates (128/192/320) for MP3 extraction.
     # fmt=q (default): yt-dlp picks best available
-    def build_format(fmt: str, q: str) -> str:
-        # Video heights
-        if q in ("2160", "1080", "720", "480", "360", "240", "144"):
-            h = q
-            if fmt == "mp4":
-                return f"bestvideo[height<={h}][ext=mp4]+bestaudio[ext=m4a]/best[height<={h}][ext=mp4]/best"
-            if fmt == "webm":
-                return f"bestvideo[height<={h}][ext=webm]+bestaudio[ext=webm]/best[height<={h}][ext=webm]/best"
-            if fmt == "video":
-                return f"bestvideo[height<={h}]+bestaudio/best[height<={h}]"
-        # Audio bitrates (use for MP3)
-        if q in ("320", "192", "128", "96", "64"):
-            br = q
-            if fmt == "mp3" or fmt == "audio":
-                return f"bestaudio[abr<={br}]/bestaudio/best"
-        # Fallback (no quality constraint)
-        if fmt == "mp3" or fmt == "audio":
-            return "bestaudio/best"
-        if fmt == "webm":
-            return "bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/best"
-        if fmt == "mp4":
-            return "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
-        # default 'best'
-        return "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
-
-    ydl_format = build_format(fmt, q)
-    is_audio_extract = fmt in ("mp3", "audio")
+    ydl_format = build_format_selector(fmt, q)
+    extract_audio = is_audio_extract(fmt)
 
     async def event_generator():
         async with download_lock:
@@ -405,7 +252,7 @@ async def download(url: str, request: Request, fmt: str = "best", q: str = "best
             }
             if FFMPEG_PATH:
                 ydl_opts["ffmpeg_location"] = FFMPEG_PATH
-            if is_audio_extract:
+            if extract_audio:
                 # Extract best audio → transcode to MP3 at user-requested kbps.
                 # Requires FFmpeg in PATH (or set ffmpeg_location above).
                 audio_quality = q if q in ("320", "192", "128", "96", "64") else "192"
@@ -535,80 +382,50 @@ def _validate_tag_filename(filename: str) -> Path:
 async def get_tag(filename: str):
     file_path = _validate_tag_filename(filename)
 
-    # Non-MP3 audio / non-audio files: no ID3 tags to read.
-    # We use mutagen.id3 per spec; the POST handler also writes ID3 only,
-    # so MP3 is the only format with persistent tags in this app.
-    if file_path.suffix.lower() != ".mp3":
-        return {"filename": filename, "tags": {}}
-
+    # Surface a clear 500 if mutagen is missing at runtime — the rest of
+    # the read path is delegated to tags.read_id3 which is best-effort.
     try:
-        from mutagen.id3 import ID3, ID3NoHeaderError
+        import mutagen.id3  # noqa: F401
     except ImportError:
         raise HTTPException(status_code=500, detail="mutagen not installed")
 
-    try:
-        try:
-            audio = ID3(str(file_path))
-        except ID3NoHeaderError:
-            return {"filename": filename, "tags": {}}
-
-        tags = {}
-        if "TIT2" in audio: tags["title"]  = str(audio["TIT2"])
-        if "TPE1" in audio: tags["artist"] = str(audio["TPE1"])
-        if "TALB" in audio: tags["album"]  = str(audio["TALB"])
-        if "TDRC" in audio: tags["year"]   = str(audio["TDRC"])
-        if "TCON" in audio: tags["genre"]  = str(audio["TCON"])
-
-        return {"filename": filename, "tags": tags}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read tags: {e}")
+    return {"filename": filename, "tags": read_id3(file_path)}
 
 
 @app.post("/api/tag")
 async def tag_file(req: TagRequest):
     file_path = _validate_tag_filename(req.filename)
 
-    if file_path.suffix.lower() not in (".mp3", ".m4a", ".flac", ".ogg"):
-        raise HTTPException(
-            status_code=415,
-            detail=f"Tagging not supported for {file_path.suffix} (use .mp3 / .m4a / .flac / .ogg)",
-        )
-
+    # Surface a clear 500 if mutagen is missing at runtime.
     try:
-        from mutagen.id3 import ID3, ID3NoHeaderError, TIT2, TPE1, TALB, TDRC, TCON
-        from mutagen.mp3 import MP3
-        from mutagen import File as MutagenFile
+        import mutagen.id3  # noqa: F401
     except ImportError:
         raise HTTPException(status_code=500, detail="mutagen not installed")
 
     try:
-        try:
-            audio = ID3(str(file_path))
-        except ID3NoHeaderError:
-            audio = ID3()  # start fresh
-
-        if req.title:  audio.delall("TIT2"); audio.add(TIT2(encoding=3, text=[req.title]))
-        if req.artist: audio.delall("TPE1"); audio.add(TPE1(encoding=3, text=[req.artist]))
-        if req.album:  audio.delall("TALB"); audio.add(TALB(encoding=3, text=[req.album]))
-        if req.year:   audio.delall("TDRC"); audio.add(TDRC(encoding=3, text=[req.year]))
-        if req.genre:  audio.delall("TCON"); audio.add(TCON(encoding=3, text=[req.genre]))
-
-        audio.save(str(file_path))
-
-        # Read back what we just wrote so the client can verify
-        saved = {}
-        if "TIT2" in audio: saved["title"]  = str(audio["TIT2"])
-        if "TPE1" in audio: saved["artist"] = str(audio["TPE1"])
-        if "TALB" in audio: saved["album"]  = str(audio["TALB"])
-        if "TDRC" in audio: saved["year"]   = str(audio["TDRC"])
-        if "TCON" in audio: saved["genre"]  = str(audio["TCON"])
-
-        return {"ok": True, "filename": req.filename, "tags": saved}
-
+        saved = write_id3(
+            file_path,
+            {
+                "title":  req.title,
+                "artist": req.artist,
+                "album":  req.album,
+                "year":   req.year,
+                "genre":  req.genre,
+            },
+        )
+    except ValueError as e:
+        # Unsupported extension — convert to 415 with the same message
+        # the original handler used.
+        raise HTTPException(
+            status_code=415,
+            detail=f"Tagging not supported for {file_path.suffix} (use .mp3 / .m4a / .flac / .ogg)"
+            if not str(e)
+            else str(e),
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Tagging failed: {e}")
+
+    return {"ok": True, "filename": req.filename, "tags": saved}
 
 
 if __name__ == "__main__":

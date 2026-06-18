@@ -1,5 +1,5 @@
 """
-Backend hardening tests for yt-dlp-gundam v0.8.0.
+Backend hardening tests for yt-dlp-gundam v0.8.1.
 
 Covers:
   B1 — per-format filesize + tbr in /api/info
@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT))
 
 import main  # noqa: E402  (path tweak above must come first)
 from fastapi.testclient import TestClient  # noqa: E402
+from formats import is_audio_only  # noqa: E402  (extracted helper)
 
 
 # --------------------------------------------------------------------------- #
@@ -189,14 +190,13 @@ class TestHasAudioLogic(unittest.TestCase):
         self._tmp.cleanup()
 
     def _extract_available(self, formats: list[dict]) -> dict:
-        """Replicate the B2 logic from /api/info to test it in isolation."""
-        def _is_audio_only(f):
-            return f.get("acodec") not in (None, "none") and f.get("vcodec") in (None, "none")
-
-        has_audio = any(_is_audio_only(f) for f in formats)
+        """Replicate the B2 logic from /api/info to test it in isolation.
+        Uses the shared is_audio_only from formats.py — same definition
+        the production endpoint uses."""
+        has_audio = any(is_audio_only(f) for f in formats)
         audio_bitrates = sorted({
             int(f.get("abr") or 0) for f in formats
-            if _is_audio_only(f) and (f.get("abr") or 0) > 0
+            if is_audio_only(f) and (f.get("abr") or 0) > 0
         }, reverse=True)
         return {"has_audio": has_audio, "audio_bitrates": audio_bitrates}
 
