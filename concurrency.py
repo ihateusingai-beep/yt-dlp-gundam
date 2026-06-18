@@ -45,11 +45,23 @@ async def try_acquire_lock(lock: asyncio.Lock, timeout: float = 0.0) -> bool:
     releasing the lock (via ``lock.release()`` or ``async with``) when
     done; this function does NOT release on the failure path.
 
-    Why ``asyncio.wait_for(lock.acquire(), timeout=...)``:
-        ``asyncio.Lock.acquire()`` is a coroutine with no native timeout
-        parameter. ``wait_for`` is the documented way to bound the wait.
-        On timeout we cancel the pending acquire, which the asyncio
-        implementation handles cleanly (no leaked state).
+    Implementation note — why not just ``asyncio.wait_for(lock.acquire(),
+    timeout=0)``?
+        It looks tempting, but it's a footgun. In Python 3.11+,
+        ``wait_for`` checks the timeout *before* the wrapped coroutine
+        gets a chance to run, so a free lock is *always* reported as a
+        timeout. That makes timeout=0 useless for a fast-path "is it
+        free?" probe. For non-zero timeouts ``wait_for`` is fine; for
+        the zero case we take the explicit fast path below.
+
+    The fast path for timeout=0 relies on single-threaded asyncio
+    semantics: between ``lock.locked()`` and ``lock.acquire()`` there is
+    no ``await`` (the unlocked branch of ``acquire`` is purely
+    synchronous — it sets ``_locked = True`` and returns), so no other
+    coroutine can interleave and "steal" the lock between our check and
+    our take. This is exactly the property the original TOCTOU code
+    lacked (it had an ``async with`` between check and take, which does
+    yield).
 
     Args:
         lock:    The asyncio.Lock to acquire.
@@ -62,6 +74,16 @@ async def try_acquire_lock(lock: asyncio.Lock, timeout: float = 0.0) -> bool:
     """
     if timeout < 0:
         timeout = 0.0
+    if timeout == 0:
+        # Non-blocking fast path. lock.locked() and the unlocked branch
+        # of lock.acquire() are both synchronous; no await, no yield,
+        # no interleaving. See the docstring above for the rationale.
+        if lock.locked():
+            return False
+        await lock.acquire()
+        return True
+    # Bounded wait. wait_for works correctly for non-zero timeouts:
+    # the wrapped coroutine is allowed to run before the timeout fires.
     try:
         await asyncio.wait_for(lock.acquire(), timeout=timeout)
         return True
