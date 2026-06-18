@@ -2,10 +2,11 @@
 yt-dlp Gundam Dashboard - FastAPI Backend
 
 v0.8.1 — refactored helpers into focused modules:
-  formats.py — format classification, projection, yt-dlp selector
-  paths.py   — frozen-vs-dev path layout
-  media.py   — FFmpeg detection, version, source label
-  tags.py    — ID3 read/write
+  formats.py    — format classification, projection, yt-dlp selector
+  paths.py      — frozen-vs-dev path layout
+  media.py      — FFmpeg detection, version, source label
+  tags.py       — ID3 read/write
+  concurrency.py — asyncio.Lock try-acquire helper (atomic check-and-take)
 This file stays focused on the FastAPI surface and the download pipeline.
 """
 import asyncio
@@ -21,6 +22,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
+from concurrency import try_acquire_lock
 from formats import (
     available_qualities,
     best_video_format,
@@ -198,13 +200,64 @@ async def info(url: str):
 # --------------------------------------------------------------------------- #
 # /api/download – SSE progress stream via progress_hooks
 # --------------------------------------------------------------------------- #
+async def _run_download(
+    url: str,
+    ydl_opts: dict,
+    queue: "asyncio.Queue[dict]",
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    """Async wrapper around the blocking yt-dlp call.
+
+    Runs yt-dlp in a thread executor so the event loop stays responsive
+    (the progress_hooks write to ``queue`` via ``call_soon_threadsafe``).
+    Cancellation propagation: if the enclosing ``asyncio.Task`` is
+    cancelled, the ``await run_in_executor`` raises ``CancelledError``;
+    the underlying thread may keep running (Python can't kill threads),
+    but the SSE generator can release the download_lock immediately so a
+    new request isn't blocked by a half-finished download.
+    """
+    def do_ydl() -> None:
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+        except Exception as e:
+            # Surface unexpected errors as a typed SSE message so the
+            # client gets a clean error instead of a silent hang.
+            try:
+                loop.call_soon_threadsafe(
+                    queue.put_nowait,
+                    {"status": "error", "error": str(e)},
+                )
+            except Exception:
+                # Queue may be torn down during shutdown; nothing useful
+                # we can do from the worker thread.
+                pass
+
+    try:
+        await loop.run_in_executor(None, do_ydl)
+    finally:
+        # Always emit a terminal "done" — even on cancellation — so any
+        # consumer that hasn't yet observed disconnect can exit. The
+        # queue is unbounded, so put_nowait can't fail with QueueFull.
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, {"status": "done"})
+        except Exception:
+            pass
+
+
 @app.get("/api/download")
 async def download(url: str, request: Request, fmt: str = "best", q: str = "best"):
     # B4: URL pre-check — same validation as /api/info.
     _validate_url(url)
 
-    # Concurrent download guard
-    if download_lock.locked():
+    # Bug 1 (TOCTOU) fix: atomic try-acquire. The old
+    #   if download_lock.locked(): raise 409
+    #   async with download_lock: ...
+    # had a race window where two concurrent requests could both see
+    # locked()==False and both reach the async-with; the second would
+    # hang forever waiting on the first. ``try_acquire_lock`` collapses
+    # the check and the take into one operation (timeout=0 = non-blocking).
+    if not await try_acquire_lock(download_lock):
         raise HTTPException(status_code=409, detail="A download is already in progress")
 
     queue: asyncio.Queue[dict] = asyncio.Queue()
@@ -240,49 +293,52 @@ async def download(url: str, request: Request, fmt: str = "best", q: str = "best
     ydl_format = build_format_selector(fmt, q)
     extract_audio = is_audio_extract(fmt)
 
+    # Pre-build ydl_opts OUTSIDE the generator so the dict is constructed
+    # once. The progress_hooks closure captures `queue` and `main_loop`
+    # from the request-handler scope.
+    ydl_opts: dict = {
+        "format": ydl_format,
+        "outtmpl": str(DOWNLOADS / "%(title)s.%(ext)s"),
+        "quiet": True,
+        "no_warnings": True,
+        "progress_hooks": [make_hook(queue)],
+        "noprogress": False,
+    }
+    if FFMPEG_PATH:
+        ydl_opts["ffmpeg_location"] = FFMPEG_PATH
+    if extract_audio:
+        # Extract best audio → transcode to MP3 at user-requested kbps.
+        # Requires FFmpeg in PATH (or set ffmpeg_location above).
+        audio_quality = q if q in ("320", "192", "128", "96", "64") else "192"
+        ydl_opts["postprocessors"] = [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": audio_quality,
+        }]
+
+    # Bug 2 (lock-held-on-disconnect) fix:
+    # The lock is acquired above (atomic try-acquire) and released in the
+    # generator's ``finally``. The SSE loop is the consumer of both the
+    # queue and the client connection: when ``request.is_disconnected()``
+    # is true (browser tab closed, network dropped, EventSource closed),
+    # we cancel the worker task and exit, which triggers the ``finally``
+    # that releases the lock. The next /api/download request can then
+    # start immediately instead of waiting for the underlying yt-dlp
+    # thread to finish on its own.
+    task: "asyncio.Task[None] | None" = None
+
     async def event_generator():
-        async with download_lock:
-            ydl_opts = {
-                "format": ydl_format,
-                "outtmpl": str(DOWNLOADS / "%(title)s.%(ext)s"),
-                "quiet": True,
-                "no_warnings": True,
-                "progress_hooks": [make_hook(queue)],
-                "noprogress": False,
-            }
-            if FFMPEG_PATH:
-                ydl_opts["ffmpeg_location"] = FFMPEG_PATH
-            if extract_audio:
-                # Extract best audio → transcode to MP3 at user-requested kbps.
-                # Requires FFmpeg in PATH (or set ffmpeg_location above).
-                audio_quality = q if q in ("320", "192", "128", "96", "64") else "192"
-                ydl_opts["postprocessors"] = [{
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": audio_quality,
-                }]
-
-            # main_loop was captured up top (closure for make_hook). Reuse it
-            # here to avoid a second asyncio.get_running_loop() call.
-            def do_download():
-                try:
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        ydl.download([url])
-                except Exception as e:
-                    main_loop.call_soon_threadsafe(
-                        queue.put_nowait,
-                        {"status": "error", "error": str(e)},
-                    )
-                finally:
-                    main_loop.call_soon_threadsafe(
-                        queue.put_nowait,
-                        {"status": "done"},
-                    )
-
-            await main_loop.run_in_executor(None, do_download)
-
+        nonlocal task
+        task = asyncio.create_task(
+            _run_download(url, ydl_opts, queue, main_loop),
+        )
+        try:
             while True:
                 if await request.is_disconnected():
+                    # Client gone — cancel the worker so its
+                    # ``await run_in_executor`` returns. The finally
+                    # below releases the lock.
+                    task.cancel()
                     break
                 try:
                     data = await asyncio.wait_for(queue.get(), timeout=15)
@@ -292,6 +348,21 @@ async def download(url: str, request: Request, fmt: str = "best", q: str = "best
                 except asyncio.TimeoutError:
                     # Heartbeat every 15 s to keep proxy connections alive
                     yield f": heartbeat\n\n"
+        finally:
+            # Make sure the worker is fully reaped — even on the normal
+            # exit path (``done`` message) we await it to surface any
+            # unexpected exceptions in logs.
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    # CancelledError is expected; any other exception was
+                    # already routed to the queue as an "error" message.
+                    pass
+            # Release the lock whether we exited via done/error/disconnect.
+            if download_lock.locked():
+                download_lock.release()
 
     return StreamingResponse(
         event_generator(),
