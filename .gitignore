@@ -13,3 +13,4 @@ dist/
 .DS_Store
 *.zip
 vendor/
+.mavis/  # Mavis/team-engine plan cache (local only)

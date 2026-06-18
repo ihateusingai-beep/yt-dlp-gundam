@@ -1,5 +1,20 @@
 # UTF-8
 #
+# ⚠️  MANUAL-PYINSTALLER FALLBACK ONLY ⚠️
+#
+# The canonical Windows build path is `yt_dlp_gundam.spec`, which auto-generates
+# `build/version_info.txt` from `__version__` in main.py at build time — that
+# file is the one shipped in the .exe.
+#
+# THIS file (repo root) is the fallback used when someone runs pyinstaller
+# directly against `yt_dlp_gundam.py` *without* the spec, e.g.:
+#     pyinstaller --onefile --version-file version_info.txt yt_dlp_gundam.py
+#
+# When bumping `__version__` in main.py:
+#   1. The spec auto-bumps build/version_info.txt at next CI build
+#   2. If you care about the manual fallback path, also bump filevers/prodvers
+#      below to match. Otherwise leave stale — CI path is unaffected.
+#
 # For more details about fixed file info 'ffi' see:
 # http://msdn.microsoft.com/en-us/library/ms646997.aspx
 VSVersionInfo(
