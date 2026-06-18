@@ -1362,11 +1362,68 @@
         function showInfo(msg)   { showToast(msg, 'info');    }
 
         // ------------------------------------------------------------------ //
-        //  State                                                              //
+        //  State machine                                                       //
         // ------------------------------------------------------------------ //
-        let analyzedData = null;
-        let activeSource = null;
-        let lastDownloadFilename = null;
+        // Single source of truth for the analyze → ready → downloading → done
+        // pipeline. All action handlers (analyze click, format select change,
+        // download click, error catches) MUST go through setPhase(); never
+        // poke analyzeBtn / downloadBtn / progressContainer directly outside
+        // of render(). The SSE onmessage handler is exempt — it streams
+        // real-time progressFill / progressPercent / progressText updates.
+        const state = {
+            phase: 'idle',          // 'idle' | 'analyzing' | 'ready' | 'downloading' | 'done' | 'error'
+            analyzedData: null,     // last successful /api/info payload
+            activeSource: null,     // current EventSource (cancellable on re-click)
+            lastDownloadFilename: null,  // basename of the most recent completed file
+            selectedFormat: '',     // current formatSelect.value (kept in sync by change handler)
+            lastError: null,        // transient — render() shows the toast once and clears it
+        };
+
+        function setPhase(next, patch = {}) {
+            Object.assign(state, patch, { phase: next });
+            render();
+        }
+
+        function render() {
+            const { phase, selectedFormat, lastError } = state;
+
+            // --- Analyze button ------------------------------------------ //
+            analyzeBtn.disabled   = phase === 'analyzing' || phase === 'downloading';
+            analyzeBtn.textContent = phase === 'analyzing' ? 'ANALYZING...' : 'ANALYZE TARGET';
+
+            // --- Download button ----------------------------------------- //
+            // canDownload = ready OR done; even then we still need a format
+            // picked. The 'idle' / 'analyzing' / 'error' phases all force-
+            // disable, matching the original canDownload=false behavior.
+            const canDownload = phase === 'ready' || phase === 'done';
+            const noFormat    = !selectedFormat;
+            downloadBtn.disabled  = phase === 'downloading' || !canDownload || noFormat;
+            // Spec text map; the 'ready' branch keeps the original
+            // "SELECT FORMAT & INITIALIZE" hint when no format is picked yet,
+            // falling back to "INITIALIZE DOWNLOAD" once a format is chosen.
+            downloadBtn.textContent = ({
+                idle:         'SELECT FORMAT & INITIALIZE',
+                analyzing:    'INITIALIZE DOWNLOAD',
+                ready:        noFormat ? 'SELECT FORMAT & INITIALIZE' : 'INITIALIZE DOWNLOAD',
+                downloading:  'DOWNLOADING...',
+                done:         'DOWNLOAD COMPLETE',
+                error:        'INITIALIZE DOWNLOAD',
+            })[phase];
+
+            // --- Progress / completion panels ---------------------------- //
+            progressContainer.style.display = phase === 'downloading' ? 'block' : 'none';
+            completionPanel.style.display   = phase === 'done'        ? 'block' : 'none';
+
+            // --- One-shot error toast ------------------------------------ //
+            // lastError is consumed by render() to avoid re-toasting on
+            // subsequent re-renders (e.g. when the user changes the format
+            // select while still in 'error' phase).
+            if (lastError) {
+                const err = lastError;
+                state.lastError = null;
+                showError(err);
+            }
+        }
 
         // ------------------------------------------------------------------ //
         //  Helpers                                                            //
@@ -1389,13 +1446,6 @@
             const label = formatBytes(bytes);
             if (label) return ' (~' + label + ')';
             return ' (size unknown)';
-        }
-
-        function setButtonsState({ analyzing, downloading, canDownload }) {
-            analyzeBtn.disabled   = analyzing || downloading;
-            analyzeBtn.textContent = analyzing ? 'ANALYZING...' : 'ANALYZE TARGET';
-            downloadBtn.disabled  = downloading || !canDownload;
-            downloadBtn.textContent = downloading ? 'DOWNLOADING...' : 'INITIALIZE DOWNLOAD';
         }
 
         function resetProgress() {
@@ -1450,9 +1500,8 @@
             }
 
             resetProgress();
-            setButtonsState({ analyzing: true, downloading: false, canDownload: false });
+            setPhase('analyzing', { analyzedData: null, selectedFormat: '', lastError: null });
             setPreview(`<div style="color: var(--accent); font-family: 'Orbitron', sans-serif;">SCANNING TARGET...</div>`);
-            analyzedData = null;
 
             try {
                 const res  = await fetch(`/api/info?url=${encodeURIComponent(url)}`);
@@ -1477,11 +1526,9 @@
                             ${data.count || (data.entries || []).length} entries — individual download coming in v0.9.0
                         </p>
                     `);
-                    setButtonsState({ analyzing: false, downloading: false, canDownload: false });
+                    setPhase('idle', { analyzedData: null, selectedFormat: '', lastError: null });
                     return;
                 }
-
-                analyzedData = data;
 
                 const thumbHtml = data.thumbnail
                     ? `<img class="preview-image" src="${data.thumbnail}" alt="thumbnail">`
@@ -1552,13 +1599,18 @@
                 }
 
                 formatSelect.innerHTML = opts.join('');
-                setButtonsState({ analyzing: false, downloading: false, canDownload: true });
-                downloadBtn.disabled   = true;
-                downloadBtn.textContent = 'SELECT FORMAT & INITIALIZE';
+                // Empty selectedFormat keeps the download button disabled with
+                // the "SELECT FORMAT & INITIALIZE" hint until the user picks
+                // one — replaces the old ad-hoc downloadBtn.disabled = true
+                // + textContent = '...' pair.
+                setPhase('ready', { analyzedData: data, selectedFormat: '' });
 
             } catch (err) {
-                showError(sanitizeMsg(err.message) || 'Analysis failed');
-                setButtonsState({ analyzing: false, downloading: false, canDownload: false });
+                setPhase('error', {
+                    lastError:     sanitizeMsg(err.message) || 'Analysis failed',
+                    analyzedData:  null,
+                    selectedFormat: '',
+                });
             }
         });
 
@@ -1566,7 +1618,11 @@
         //  Format select — re-enable download once format chosen             //
         // ------------------------------------------------------------------ //
         formatSelect.addEventListener('change', () => {
-            downloadBtn.disabled = !analyzedData || !formatSelect.value;
+            // Keep the same phase, just sync selectedFormat. render() recomputes
+            // analyzeBtn/downloadBtn from state, so a busy phase ('analyzing' or
+            // 'downloading') leaves both buttons in their busy text/disabled
+            // state regardless of selectedFormat.
+            setPhase(state.phase, { selectedFormat: formatSelect.value });
         });
 
         // ------------------------------------------------------------------ //
@@ -1577,28 +1633,29 @@
             const [fmt, q] = (formatSelect.value || 'best|best').split('|');
             if (!url) return;
 
-            if (activeSource) {
-                activeSource.close();
-                activeSource = null;
+            if (state.activeSource) {
+                state.activeSource.close();
+                state.activeSource = null;
             }
 
-            setButtonsState({ analyzing: false, downloading: true, canDownload: false });
-            progressContainer.style.display = 'block';
-            completionPanel.style.display    = 'none';
-            progressText.textContent         = 'INITIALIZING...';
+            // Phase flip + transient INITIALIZING... label. progressContainer
+            // visibility is owned by render(); the SSE handler will overwrite
+            // progressText as soon as it sees a 'downloading' event.
+            setPhase('downloading', { lastError: null });
+            progressText.textContent = 'INITIALIZING...';
 
-            activeSource = new EventSource(
+            const source = new EventSource(
                 `/api/download?url=${encodeURIComponent(url)}&fmt=${encodeURIComponent(fmt)}&q=${encodeURIComponent(q || 'best')}`
             );
+            state.activeSource = source;
 
-            activeSource.onmessage = (e) => {
+            source.onmessage = (e) => {
                 const d = JSON.parse(e.data);
 
                 if (d.status === 'error') {
-                    activeSource.close();
-                    activeSource = null;
-                    showError(sanitizeMsg(d.error) || 'Download error');
-                    setButtonsState({ analyzing: false, downloading: false, canDownload: true });
+                    source.close();
+                    state.activeSource = null;
+                    setPhase('error', { lastError: sanitizeMsg(d.error) || 'Download error' });
                     return;
                 }
 
@@ -1619,27 +1676,28 @@
                 }
 
                 if (d.status === 'done') {
-                    activeSource.close();
-                    activeSource = null;
+                    source.close();
+                    state.activeSource = null;
                     progressText.textContent = 'COMPLETE';
                     progressFill.style.width = '100%';
                     progressPercent.textContent = '100%';
-                    completionPanel.style.display = 'block';
                     const lastFilename = (d.filename || '').split(/[\\/]/).pop();
-                    lastDownloadFilename = lastFilename || null;
+                    // 'done' phase turns on the completion panel via render()
+                    // and stores the basename for the ID3 tag button. The
+                    // download button now reads "DOWNLOAD COMPLETE" via the
+                    // 'done' text-map entry — replaces the ad-hoc
+                    // downloadBtn.textContent = 'DOWNLOAD COMPLETE' line.
+                    setPhase('done', { lastDownloadFilename: lastFilename || null });
                     showDownloadLink(lastFilename);
                     triggerCelebration();
-                    setButtonsState({ analyzing: false, downloading: false, canDownload: true });
-                    downloadBtn.textContent = 'DOWNLOAD COMPLETE';
                     loadFiles();
                 }
             };
 
-            activeSource.onerror = () => {
-                if (activeSource) activeSource.close();
-                activeSource = null;
-                showError('Connection lost during download');
-                setButtonsState({ analyzing: false, downloading: false, canDownload: true });
+            source.onerror = () => {
+                if (state.activeSource) state.activeSource.close();
+                state.activeSource = null;
+                setPhase('error', { lastError: 'Connection lost during download' });
             };
         });
 
@@ -1775,7 +1833,7 @@
         //  Apply ID3 tags                                                     //
         // ------------------------------------------------------------------ //
         document.getElementById('applyTagBtn').addEventListener('click', async () => {
-            const filename = lastDownloadFilename;
+            const filename = state.lastDownloadFilename;
             if (!filename) return;
 
             const payload = {
@@ -1817,6 +1875,11 @@
         // ------------------------------------------------------------------ //
         //  Init                                                               //
         // ------------------------------------------------------------------ //
+        // Normalize the initial DOM to match state.idle. Cheap and idempotent:
+        // analyzeBtn → "ANALYZE TARGET" (the HTML ships with mixed-case
+        // "Analyze Target"), downloadBtn → "SELECT FORMAT & INITIALIZE" (HTML
+        // ships with "Initialize Download"), both panels hidden.
+        render();
         loadFiles();
 
         // Display server version in header
