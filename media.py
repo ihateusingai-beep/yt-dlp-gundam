@@ -13,6 +13,7 @@ doesn't exist on the user's disk, so we must check _MEIPASS first.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -78,11 +79,17 @@ def get_ffmpeg_version() -> str:
 
 def ffmpeg_source_label(path: str) -> str:
     """Classify `path` as 'bundled' (shipped with the app) or 'system' (the
-    user's install). The bundled source is the imageio-ffmpeg cached
-    binary; the system source is anything else (PATH, _MEIPASS, manual)."""
+    user's install). Two bundled sources:
+      - PyInstaller frozen exe: ffmpeg.exe lives under sys._MEIPASS (this is
+        the spec-bundled `vendor/ffmpeg.exe`).
+      - Dev mode: imageio-ffmpeg's cached binary.
+    Anything else (shutil.which, C:\\ffmpeg, manual install) is 'system'."""
     try:
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass and (path == meipass or path.startswith(meipass + os.sep)):
+            return "bundled"  # spec-bundled at _MEIPASS (vendor/ffmpeg.exe)
         if "imageio" in path.lower() or "site-packages" in path:
-            return "bundled"
+            return "bundled"  # imageio-ffmpeg cached
         return "system"
     except Exception:
         return "unknown"

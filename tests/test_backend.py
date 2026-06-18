@@ -348,6 +348,163 @@ class TestGetTag(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# TagRequest Pydantic length validation (v0.8.2)
+# --------------------------------------------------------------------------- #
+
+class TestTagRequestValidation(unittest.TestCase):
+    """B9: POST /api/tag payload must respect field length limits set on
+    the Pydantic TagRequest model. Over-limit payloads should be rejected
+    with 422 (FastAPI's default Pydantic error code) BEFORE reaching
+    _validate_tag_filename — defense in depth against malicious clients
+    sending huge strings."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self._orig_downloads = main.DOWNLOADS
+        main.DOWNLOADS = Path(self._tmp.name)
+        main.DOWNLOADS.mkdir(exist_ok=True)
+        # Create a real MP3 so the request would otherwise succeed.
+        from mutagen.id3 import ID3
+        self._mp3 = main.DOWNLOADS / "test.mp3"
+        self._mp3.touch()
+        try:
+            ID3(str(self._mp3))
+        except Exception:
+            ID3()
+        self.client = TestClient(main.app)
+
+    def tearDown(self) -> None:
+        main.DOWNLOADS = self._orig_downloads
+        self._tmp.cleanup()
+
+    def test_normal_payload_succeeds(self) -> None:
+        """A reasonable payload must still work — the length caps must
+        not break the happy path."""
+        r = self.client.post("/api/tag", json={
+            "filename": "test.mp3",
+            "title": "Cruel Angel",
+            "artist": "Yoko Takahashi",
+            "year": "1995",
+        })
+        self.assertEqual(r.status_code, 200, r.text)
+
+    def test_oversized_filename_rejected(self) -> None:
+        r = self.client.post("/api/tag", json={
+            "filename": "a" * 256,  # max_length=255
+            "title": "T",
+        })
+        self.assertEqual(r.status_code, 422, r.text)
+
+    def test_oversized_title_rejected(self) -> None:
+        r = self.client.post("/api/tag", json={
+            "filename": "test.mp3",
+            "title": "a" * 513,  # max_length=512
+        })
+        self.assertEqual(r.status_code, 422, r.text)
+
+    def test_oversized_year_rejected(self) -> None:
+        r = self.client.post("/api/tag", json={
+            "filename": "test.mp3",
+            "year": "1" * 17,  # max_length=16
+        })
+        self.assertEqual(r.status_code, 422, r.text)
+
+    def test_empty_filename_rejected_by_pydantic(self) -> None:
+        """min_length=1 on filename means Pydantic catches the empty
+        string with 422 BEFORE _validate_tag_filename (which would have
+        returned 400). The behaviour change is intentional — invalid
+        payloads should fail at the schema boundary, not deep inside."""
+        r = self.client.post("/api/tag", json={"filename": ""})
+        self.assertEqual(r.status_code, 422, r.text)
+
+
+# --------------------------------------------------------------------------- #
+# ffmpeg_source_label (media.py) — bundled vs system classification
+# --------------------------------------------------------------------------- #
+
+class TestFfmpegSourceLabel(unittest.TestCase):
+    """B10: ffmpeg_source_label must classify the three bundled sources
+    (sys._MEIPASS in frozen, imageio-ffmpeg, site-packages) as 'bundled',
+    and everything else (shutil.which, manual install paths) as 'system'."""
+
+    def setUp(self) -> None:
+        from media import ffmpeg_source_label
+        self.ffmpeg_source_label = ffmpeg_source_label
+        # Snapshot sys._MEIPASS so we can restore it — the function reads
+        # it at call time, so tests need to mock + restore around each call.
+        self._real_meipass = getattr(sys, "_MEIPASS", None)
+        # Make sure it's not set in dev mode (CI may set it for other reasons).
+        if hasattr(sys, "_MEIPASS"):
+            try:
+                del sys._MEIPASS
+            except AttributeError:
+                pass
+
+    def tearDown(self) -> None:
+        if self._real_meipass is not None:
+            sys._MEIPASS = self._real_meipass
+        elif hasattr(sys, "_MEIPASS"):
+            try:
+                del sys._MEIPASS
+            except AttributeError:
+                pass
+
+    def test_imageio_path_is_bundled(self) -> None:
+        self.assertEqual(
+            self.ffmpeg_source_label("/Users/x/Library/imageio/ffmpeg/ffmpeg.exe"),
+            "bundled",
+        )
+
+    def test_site_packages_path_is_bundled(self) -> None:
+        self.assertEqual(
+            self.ffmpeg_source_label("/usr/lib/python3.12/site-packages/imageio_ffmpeg/bin/ffmpeg"),
+            "bundled",
+        )
+
+    def test_system_path_is_system(self) -> None:
+        # shutil.which result — user-installed.
+        self.assertEqual(
+            self.ffmpeg_source_label("/usr/local/bin/ffmpeg"),
+            "system",
+        )
+
+    def test_windows_fallback_is_system(self) -> None:
+        # The "C:/ffmpeg/bin/ffmpeg.exe" fallback path.
+        self.assertEqual(
+            self.ffmpeg_source_label("C:/ffmpeg/bin/ffmpeg.exe"),
+            "system",
+        )
+
+    def test_meipass_path_is_bundled(self) -> None:
+        """The frozen-exe case: ffmpeg.exe is bundled under sys._MEIPASS
+        (this is what the spec's vendor/ffmpeg.exe gets extracted to).
+        This was the bug — previously classified as 'system' because
+        the path doesn't contain 'imageio' or 'site-packages'."""
+        sys._MEIPASS = "/tmp/_internal"
+        try:
+            self.assertEqual(
+                self.ffmpeg_source_label("/tmp/_internal/ffmpeg.exe"),
+                "bundled",
+            )
+            # Nested deeper in _MEIPASS — also bundled.
+            self.assertEqual(
+                self.ffmpeg_source_label("/tmp/_internal/vendor/ffmpeg.exe"),
+                "bundled",
+            )
+        finally:
+            try:
+                del sys._MEIPASS
+            except AttributeError:
+                pass
+
+    def test_non_string_input_returns_unknown(self) -> None:
+        # Defensive — function takes a `path: str` but a future caller
+        # could pass something else. The bare-except in the function
+        # must swallow it gracefully.
+        self.assertEqual(self.ffmpeg_source_label(None), "unknown")  # type: ignore[arg-type]
+
+
+# --------------------------------------------------------------------------- #
 # B1 / B3 / B4 end-to-end with mocked yt-dlp (no network required)
 # --------------------------------------------------------------------------- #
 

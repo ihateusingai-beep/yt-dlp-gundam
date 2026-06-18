@@ -20,7 +20,7 @@ from pathlib import Path
 import yt_dlp
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from concurrency import try_acquire_lock
 from formats import (
@@ -33,7 +33,7 @@ from formats import (
     resolution_label,
 )
 from media import FFMPEG_PATH, ffmpeg_source_label, get_ffmpeg_version
-from paths import APP_DIR, BASE_DIR, DOWNLOADS, TEMPLATES, init_downloads_dir
+from paths import DOWNLOADS, TEMPLATES, init_downloads_dir
 from tags import read_id3, write_id3
 
 # --------------------------------------------------------------------------- #
@@ -44,7 +44,7 @@ from tags import read_id3, write_id3
 #   MINOR — new feature
 #   PATCH — bug fix / polish / refactor
 # The CI workflow reads this and stamps it onto artifact + exe metadata.
-__version__ = "0.8.1"
+__version__ = "0.8.2"
 
 # Ensure DOWNLOADS exists on startup. Idempotent.
 init_downloads_dir()
@@ -347,7 +347,7 @@ async def download(url: str, request: Request, fmt: str = "best", q: str = "best
                         break
                 except asyncio.TimeoutError:
                     # Heartbeat every 15 s to keep proxy connections alive
-                    yield f": heartbeat\n\n"
+                    yield ": heartbeat\n\n"
         finally:
             # Make sure the worker is fully reaped — even on the normal
             # exit path (``done`` message) we await it to surface any
@@ -422,13 +422,18 @@ async def get_file(filename: str):
 # --------------------------------------------------------------------------- #
 # /api/tag – read + write ID3 metadata for an audio file
 # --------------------------------------------------------------------------- #
+# Field length limits are defense-in-depth: the path-traversal guard in
+# _validate_tag_filename already rejects "../" and slashes, and these
+# caps stop a malicious client from POSTing a 10MB title or a 1KB year
+# string. The numbers are generous (ID3v2 frames are 256MB-capable in
+# spec, but anything past a few hundred bytes is almost certainly junk).
 class TagRequest(BaseModel):
-    filename: str
-    title:    str | None = None
-    artist:   str | None = None
-    album:    str | None = None
-    year:     str | None = None
-    genre:    str | None = None
+    filename: str = Field(..., min_length=1, max_length=255)
+    title:    str | None = Field(None, max_length=512)
+    artist:   str | None = Field(None, max_length=512)
+    album:    str | None = Field(None, max_length=512)
+    year:     str | None = Field(None, max_length=16)   # "1995" / "2024-Q1" / etc.
+    genre:    str | None = Field(None, max_length=128)
 
 
 def _validate_tag_filename(filename: str) -> Path:

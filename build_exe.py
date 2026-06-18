@@ -3,7 +3,6 @@ Nuitka build script — cross-platform portable .exe.
 Run: python build_exe.py
 Outputs: dist/yt_dlp_gundam.exe  (or dist/yt_dlp_gundam/ on --standalone)
 """
-import os
 import subprocess
 import sys
 from pathlib import Path
