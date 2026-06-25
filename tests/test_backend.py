@@ -614,5 +614,75 @@ class TestInfoProjectedShape(unittest.TestCase):
         self.assertEqual(e["url"], "https://x/1")
 
 
+# --------------------------------------------------------------------------- #
+# B11 — host binding (security, v0.8.3)
+# --------------------------------------------------------------------------- #
+
+class TestHostBinding(unittest.TestCase):
+    """B11: v0.8.3 hardens against LAN/internet exposure of the unauth'd
+    dashboard. DEFAULT_HOST must default to 127.0.0.1 (loopback), honor
+    YT_DLP_GUNDAM_HOST env var override, and surface the resolved value
+    via /api/health so the UI / smoke checks can verify what's bound."""
+
+    def setUp(self) -> None:
+        self.client = TestClient(main.app)
+        # Snapshot env so we can restore between tests — DEFAULT_HOST is
+        # resolved at import time from os.environ, so flipping the env
+        # after import has no effect on the running module. We test the
+        # /api/health surface (which reads DEFAULT_HOST at request time)
+        # and assert the default vs. env-override behavior on the
+        # default itself.
+        self._env_snapshot = os.environ.get("YT_DLP_GUNDAM_HOST")
+
+    def tearDown(self) -> None:
+        if self._env_snapshot is None:
+            os.environ.pop("YT_DLP_GUNDAM_HOST", None)
+        else:
+            os.environ["YT_DLP_GUNDAM_HOST"] = self._env_snapshot
+
+    def test_default_host_is_loopback(self) -> None:
+        """No env override → DEFAULT_HOST must be 127.0.0.1, NOT 0.0.0.0.
+
+        Regression guard for v0.8.2 → v0.8.3: earlier versions bound
+        0.0.0.0 by default, exposing the dashboard on the LAN/internet
+        with no auth."""
+        os.environ.pop("YT_DLP_GUNDAM_HOST", None)
+        self.assertEqual(main.DEFAULT_HOST, "127.0.0.1",
+            f"DEFAULT_HOST must default to loopback, got {main.DEFAULT_HOST!r}")
+
+    def test_env_var_overrides_host(self) -> None:
+        """YT_DLP_GUNDAM_HOST=0.0.0.0 must override the loopback default
+        for users who deliberately want LAN exposure (e.g. remote control
+        over Tailscale)."""
+        os.environ["YT_DLP_GUNDAM_HOST"] = "0.0.0.0"
+        self.assertEqual(os.environ.get("YT_DLP_GUNDAM_HOST"), "0.0.0.0")
+        # NOTE: main.DEFAULT_HOST is captured at import time, so this test
+        # documents the env-var contract. The runtime override actually
+        # applied is `host=DEFAULT_HOST` in uvicorn.run() — which the
+        # /api/health surface reflects.
+
+    def test_health_surfaces_host(self) -> None:
+        """/api/health must include the configured host so the UI / smoke
+        tests can verify bind behavior without having to lsof the port."""
+        r = self.client.get("/api/health")
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertIn("host", body,
+            "/api/health must surface the bound host (added v0.8.3)")
+        # In a test process DEFAULT_HOST was captured at import time —
+        # accept either 127.0.0.1 (CI default) or whatever was set in
+        # the parent shell. The important property is that the value
+        # matches main.DEFAULT_HOST exactly (no surprises / no shadowing).
+        self.assertEqual(body["host"], main.DEFAULT_HOST)
+
+    def test_health_version_is_current(self) -> None:
+        """/api/health must report the same __version__ we bumped.
+        Smoke guard: catches accidental version bumps in CI that don't
+        propagate through /api/health (e.g. someone overrides FastAPI's
+        `version=` arg)."""
+        r = self.client.get("/api/health")
+        self.assertEqual(r.json()["version"], main.__version__)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

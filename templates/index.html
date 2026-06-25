@@ -1695,7 +1695,15 @@
             };
 
             source.onerror = () => {
-                if (state.activeSource) state.activeSource.close();
+                // v0.8.3 fix: only treat this as a real mid-stream error.
+                // Browser fires onerror asynchronously when the source is
+                // closed — by us (in the 'done' / 'error' handlers above,
+                // or in the supersede-old-source branch of this handler)
+                // OR by the server (genuine drop). Compare references:
+                // state.activeSource has been cleared / replaced in every
+                // intentional-close path before source.close() runs.
+                if (state.activeSource !== source) return;
+                source.close();
                 state.activeSource = null;
                 setPhase('error', { lastError: 'Connection lost during download' });
             };

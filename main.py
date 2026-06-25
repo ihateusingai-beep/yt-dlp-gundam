@@ -1,6 +1,8 @@
 """
 yt-dlp Gundam Dashboard - FastAPI Backend
 
+v0.8.3 — security: host binding (default 127.0.0.1) + frontend SSE onerror guard
+v0.8.2 — Windows tray toast, Pydantic length validation, lint cleanup
 v0.8.1 — refactored helpers into focused modules:
   formats.py    — format classification, projection, yt-dlp selector
   paths.py      — frozen-vs-dev path layout
@@ -44,10 +46,20 @@ from tags import read_id3, write_id3
 #   MINOR — new feature
 #   PATCH — bug fix / polish / refactor
 # The CI workflow reads this and stamps it onto artifact + exe metadata.
-__version__ = "0.8.2"
+__version__ = "0.8.3"
 
 # Ensure DOWNLOADS exists on startup. Idempotent.
 init_downloads_dir()
+
+# --------------------------------------------------------------------------- #
+# Network bind (security)
+# --------------------------------------------------------------------------- #
+# v0.8.3 — default to loopback. v0.8.2 and earlier bound 0.0.0.0, which
+# exposed the dashboard to the LAN/internet with no auth — anyone on the
+# network could trigger downloads on the user's machine. Single-user local
+# apps should bind loopback by default. Power users can opt back in to LAN
+# exposure by setting YT_DLP_GUNDAM_HOST=0.0.0.0 before launching.
+DEFAULT_HOST = os.environ.get("YT_DLP_GUNDAM_HOST", "127.0.0.1")
 
 # --------------------------------------------------------------------------- #
 # URL validation
@@ -95,6 +107,7 @@ async def health():
     return {
         "status": "ok",
         "version": __version__,
+        "host": DEFAULT_HOST,
         "ffmpeg": {
             "path": FFMPEG_PATH,
             "source": ffmpeg_source_label(FFMPEG_PATH) if FFMPEG_PATH else "missing",
@@ -567,10 +580,12 @@ if __name__ == "__main__":
     # `use_colors=False` is belt-and-suspenders for the stdout/stderr
     # redirect above — even if a future uvicorn version checks isatty()
     # elsewhere, this guarantees the formatter stays color-free.
+    # `host=DEFAULT_HOST` binds loopback by default (security, v0.8.3);
+    # set YT_DLP_GUNDAM_HOST=0.0.0.0 to expose on LAN/internet.
     try:
         uvicorn.run(
             "__main__:app",
-            host="0.0.0.0",
+            host=DEFAULT_HOST,
             port=port,
             reload=not is_frozen,
             use_colors=False,
