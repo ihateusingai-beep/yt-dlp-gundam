@@ -26,16 +26,37 @@ else:
     APP_DIR = Path(__file__).parent.resolve()
     TEMPLATES = APP_DIR / "templates"
 
-# Alias for templates bundling in frozen mode.
-BASE_DIR = APP_DIR
-
-# downloads/ goes next to the .exe so users can find their files. We
-# create the directory on import so /api/files and /api/download can
-# write to it without an extra startup check.
+# downloads/ goes next to the .exe so users can find their files. If
+# APP_DIR is read-only (frozen exe installed under Program Files, etc.),
+# init_downloads_dir() falls back to ~/yt-dlp-gundam-downloads/ and
+# rebinds the module-level DOWNLOADS in place.
 DOWNLOADS = APP_DIR / "downloads"
 
 
 def init_downloads_dir() -> Path:
-    """Create DOWNLOADS if missing and return it. Idempotent."""
-    DOWNLOADS.mkdir(exist_ok=True)
-    return DOWNLOADS
+    """Create DOWNLOADS if missing and return it.
+
+    On a read-only APP_DIR (typical when a frozen .exe is installed under
+    Program Files or similar protected path), the original mkdir raises
+    PermissionError / OSError. In that case we fall back to the user's
+    home directory and rebind the module-level ``DOWNLOADS`` so all
+    subsequent uses (/api/files, /api/download, /api/folder) see the
+    fallback location without each call site having to care.
+
+    The fallback path is announced on stderr so the user knows where
+    their files landed when the bundled location failed.
+    """
+    global DOWNLOADS
+    try:
+        DOWNLOADS.mkdir(exist_ok=True, parents=True)
+        return DOWNLOADS
+    except (PermissionError, OSError) as e:
+        fallback = Path.home() / "yt-dlp-gundam-downloads"
+        fallback.mkdir(exist_ok=True, parents=True)
+        DOWNLOADS = fallback
+        print(
+            f"[paths] APP_DIR not writable ({APP_DIR}: {e}); "
+            f"using fallback {fallback}",
+            file=sys.stderr,
+        )
+        return fallback

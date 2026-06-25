@@ -1,6 +1,9 @@
 """
 yt-dlp Gundam Dashboard - FastAPI Backend
 
+v0.8.4 — AUDIO_BITRATES source-of-truth, lock leak safety net, read-only
+         APP_DIR fallback, ffmpeg version UTF-8, osascript argv, .part file
+         filter, dead-code cleanup
 v0.8.3 — security: host binding (default 127.0.0.1) + frontend SSE onerror guard
 v0.8.2 — Windows tray toast, Pydantic length validation, lint cleanup
 v0.8.1 — refactored helpers into focused modules:
@@ -26,6 +29,7 @@ from pydantic import BaseModel, Field
 
 from concurrency import try_acquire_lock
 from formats import (
+    AUDIO_BITRATES,
     available_qualities,
     best_video_format,
     build_format_selector,
@@ -46,7 +50,7 @@ from tags import read_id3, write_id3
 #   MINOR — new feature
 #   PATCH — bug fix / polish / refactor
 # The CI workflow reads this and stamps it onto artifact + exe metadata.
-__version__ = "0.8.3"
+__version__ = "0.8.4"
 
 # Ensure DOWNLOADS exists on startup. Idempotent.
 init_downloads_dir()
@@ -86,8 +90,13 @@ app = FastAPI(title="yt-dlp Gundam Dashboard", version=__version__)
 # Per-host download lock so we can't have two downloads racing.
 download_lock = asyncio.Lock()
 
-# Log on startup (after app is created so logs are visible)
-print(f"[health] FFmpeg {'found: ' + FFMPEG_PATH + ' (' + get_ffmpeg_version() + ')' if FFMPEG_PATH else 'NOT found – some features may be limited'}")
+# Log on startup (after app is created so logs are visible). v0.8.4 —
+# split into two readable lines instead of one nested f-string with
+# string concatenation that required a triple-take to parse.
+if FFMPEG_PATH:
+    print(f"[health] FFmpeg found: {FFMPEG_PATH} ({get_ffmpeg_version()})")
+else:
+    print("[health] FFmpeg NOT found – some features may be limited")
 
 # --------------------------------------------------------------------------- #
 # Static / HTML
@@ -140,8 +149,8 @@ async def info(url: str):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             raw = ydl.extract_info(url, download=False)
 
-        if raw is None:
-            raise HTTPException(status_code=422, detail="Could not extract video info")
+        # Note: extract_info raises DownloadError on failure rather than
+        # returning None, so no None-check is needed here.
 
         # B3: playlist detection — return a different shape for playlists
         # so the frontend can show a friendly "this is a playlist" message.
@@ -195,19 +204,31 @@ async def info(url: str):
             ],
         }
     except yt_dlp.utils.DownloadError as e:
-        # Clean the error: yt-dlp prefixes with "ERROR: [site] " which the
-        # browser console mis-renders as an ANSI color escape (e.g. "[0;31, error]").
-        msg = str(e).strip()
-        msg = re.sub(r"^ERROR:\s*\[[^\]]+\]\s*", "", msg)
-        raise HTTPException(status_code=422, detail=msg or "Download error")
+        raise HTTPException(
+            status_code=422,
+            detail=_clean_ytdlp_msg(e) or "Download error",
+        )
     except HTTPException:
         # Re-raise FastAPI's own HTTPException (e.g. from _validate_url) so
         # the global 500 fallback below doesn't swallow the original status.
         raise
     except Exception as e:
-        msg = str(e).strip()
-        msg = re.sub(r"^ERROR:\s*\[[^\]]+\]\s*", "", msg)
-        raise HTTPException(status_code=500, detail=msg or "Internal server error")
+        raise HTTPException(
+            status_code=500,
+            detail=_clean_ytdlp_msg(e) or "Internal server error",
+        )
+
+
+def _clean_ytdlp_msg(e: Exception | str) -> str:
+    """Strip the yt-dlp ``ERROR: [site] `` prefix from a DownloadError
+    message so the browser console doesn't mis-render it as an ANSI color
+    escape (e.g. ``[0;31, error]``).
+
+    Used by both the DownloadError and generic Exception handlers in
+    /api/info — single source of truth for the cleanup regex.
+    """
+    msg = str(e).strip()
+    return re.sub(r"^ERROR:\s*\[[^\]]+\]\s*", "", msg)
 
 
 # --------------------------------------------------------------------------- #
@@ -272,116 +293,144 @@ async def download(url: str, request: Request, fmt: str = "best", q: str = "best
     # the check and the take into one operation (timeout=0 = non-blocking).
     if not await try_acquire_lock(download_lock):
         raise HTTPException(status_code=409, detail="A download is already in progress")
+    # v0.8.4 lock-leak safety net: if anything in the setup phase
+    # (build_format_selector, ydl_opts construction, make_hook closure,
+    # etc.) raises BEFORE we return the StreamingResponse, the
+    # event_generator's finally block never runs and the lock is held
+    # forever. ``_lock_held`` is the truth-source — the generator
+    # clears it before releasing the lock; the outer try/except also
+    # clears + releases if setup itself fails.
+    _lock_held = True
+    try:
+        queue: asyncio.Queue[dict] = asyncio.Queue()
 
-    queue: asyncio.Queue[dict] = asyncio.Queue()
+        # Capture the running event loop NOW (on the async side) so the worker
+        # thread (which has no event loop of its own) can use call_soon_threadsafe.
+        main_loop = asyncio.get_running_loop()
 
-    # Capture the running event loop NOW (on the async side) so the worker
-    # thread (which has no event loop of its own) can use call_soon_threadsafe.
-    main_loop = asyncio.get_running_loop()
+        def make_hook(q: asyncio.Queue[dict]):
+            def hook(d: dict):
+                out = {
+                    "status":            d.get("status", ""),
+                    "filename":          d.get("filename", ""),
+                    "elapsed":           d.get("elapsed", 0),
+                    "speed":             d.get("speed"),
+                    "eta":               d.get("eta"),
+                    "total_bytes":       d.get("total_bytes"),
+                    "downloaded_bytes":  d.get("downloaded_bytes", 0),
+                    "progress":          d.get("progress", 0),
+                    "_percent_str":      d.get("_percent_str", ""),
+                    "_speed_str":        d.get("_speed_str", ""),
+                    "_eta_str":          d.get("_eta_str", ""),
+                }
+                # Closure-captured loop (not asyncio.get_event_loop) avoids
+                # RuntimeError in worker threads on Python 3.10+.
+                main_loop.call_soon_threadsafe(q.put_nowait, out)
+            return hook
 
-    def make_hook(q: asyncio.Queue[dict]):
-        def hook(d: dict):
-            out = {
-                "status":            d.get("status", ""),
-                "filename":          d.get("filename", ""),
-                "elapsed":           d.get("elapsed", 0),
-                "speed":             d.get("speed"),
-                "eta":               d.get("eta"),
-                "total_bytes":       d.get("total_bytes"),
-                "downloaded_bytes":  d.get("downloaded_bytes", 0),
-                "progress":          d.get("progress", 0),
-                "_percent_str":      d.get("_percent_str", ""),
-                "_speed_str":        d.get("_speed_str", ""),
-                "_eta_str":          d.get("_eta_str", ""),
-            }
-            # Closure-captured loop (not asyncio.get_event_loop) avoids
-            # RuntimeError in worker threads on Python 3.10+.
-            main_loop.call_soon_threadsafe(q.put_nowait, out)
-        return hook
+        # Map frontend fmt string to yt-dlp format selector. The `q` param
+        # further refines the selector: video heights (480/720/1080/2160) or
+        # audio bitrates (128/192/320) for MP3 extraction.
+        # fmt=q (default): yt-dlp picks best available
+        ydl_format = build_format_selector(fmt, q)
+        extract_audio = is_audio_extract(fmt)
 
-    # Map frontend fmt string to yt-dlp format selector. The `q` param
-    # further refines the selector: video heights (480/720/1080/2160) or
-    # audio bitrates (128/192/320) for MP3 extraction.
-    # fmt=q (default): yt-dlp picks best available
-    ydl_format = build_format_selector(fmt, q)
-    extract_audio = is_audio_extract(fmt)
+        # Pre-build ydl_opts OUTSIDE the generator so the dict is constructed
+        # once. The progress_hooks closure captures `queue` and `main_loop`
+        # from the request-handler scope.
+        ydl_opts: dict = {
+            "format": ydl_format,
+            "outtmpl": str(DOWNLOADS / "%(title)s.%(ext)s"),
+            "quiet": True,
+            "no_warnings": True,
+            "progress_hooks": [make_hook(queue)],
+            "noprogress": False,
+        }
+        if FFMPEG_PATH:
+            ydl_opts["ffmpeg_location"] = FFMPEG_PATH
+        if extract_audio:
+            # Extract best audio → transcode to MP3 at user-requested kbps.
+            # Requires FFmpeg in PATH (or set ffmpeg_location above).
+            # v0.8.4 — use the AUDIO_BITRATES constant from formats.py as the
+            # single source of truth; the hardcoded tuple here was a
+            # divergence waiting to happen.
+            audio_quality = q if q in AUDIO_BITRATES else "192"
+            ydl_opts["postprocessors"] = [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": audio_quality,
+            }]
 
-    # Pre-build ydl_opts OUTSIDE the generator so the dict is constructed
-    # once. The progress_hooks closure captures `queue` and `main_loop`
-    # from the request-handler scope.
-    ydl_opts: dict = {
-        "format": ydl_format,
-        "outtmpl": str(DOWNLOADS / "%(title)s.%(ext)s"),
-        "quiet": True,
-        "no_warnings": True,
-        "progress_hooks": [make_hook(queue)],
-        "noprogress": False,
-    }
-    if FFMPEG_PATH:
-        ydl_opts["ffmpeg_location"] = FFMPEG_PATH
-    if extract_audio:
-        # Extract best audio → transcode to MP3 at user-requested kbps.
-        # Requires FFmpeg in PATH (or set ffmpeg_location above).
-        audio_quality = q if q in ("320", "192", "128", "96", "64") else "192"
-        ydl_opts["postprocessors"] = [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": audio_quality,
-        }]
+        # Bug 2 (lock-held-on-disconnect) fix:
+        # The lock is acquired above (atomic try-acquire) and released in the
+        # generator's ``finally``. The SSE loop is the consumer of both the
+        # queue and the client connection: when ``request.is_disconnected()``
+        # is true (browser tab closed, network dropped, EventSource closed),
+        # we cancel the worker task and exit, which triggers the ``finally``
+        # that releases the lock. The next /api/download request can then
+        # start immediately instead of waiting for the underlying yt-dlp
+        # thread to finish on its own.
+        task: "asyncio.Task[None] | None" = None
 
-    # Bug 2 (lock-held-on-disconnect) fix:
-    # The lock is acquired above (atomic try-acquire) and released in the
-    # generator's ``finally``. The SSE loop is the consumer of both the
-    # queue and the client connection: when ``request.is_disconnected()``
-    # is true (browser tab closed, network dropped, EventSource closed),
-    # we cancel the worker task and exit, which triggers the ``finally``
-    # that releases the lock. The next /api/download request can then
-    # start immediately instead of waiting for the underlying yt-dlp
-    # thread to finish on its own.
-    task: "asyncio.Task[None] | None" = None
-
-    async def event_generator():
-        nonlocal task
-        task = asyncio.create_task(
-            _run_download(url, ydl_opts, queue, main_loop),
-        )
-        try:
-            while True:
-                if await request.is_disconnected():
-                    # Client gone — cancel the worker so its
-                    # ``await run_in_executor`` returns. The finally
-                    # below releases the lock.
-                    task.cancel()
-                    break
-                try:
-                    data = await asyncio.wait_for(queue.get(), timeout=15)
-                    yield f"data: {json.dumps(data)}\n\n"
-                    if data.get("status") in ("done", "error"):
+        async def event_generator():
+            nonlocal task, _lock_held
+            task = asyncio.create_task(
+                _run_download(url, ydl_opts, queue, main_loop),
+            )
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        # Client gone — cancel the worker so its
+                        # ``await run_in_executor`` returns. The finally
+                        # below releases the lock.
+                        task.cancel()
                         break
-                except asyncio.TimeoutError:
-                    # Heartbeat every 15 s to keep proxy connections alive
-                    yield ": heartbeat\n\n"
-        finally:
-            # Make sure the worker is fully reaped — even on the normal
-            # exit path (``done`` message) we await it to surface any
-            # unexpected exceptions in logs.
-            if task is not None and not task.done():
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    # CancelledError is expected; any other exception was
-                    # already routed to the queue as an "error" message.
-                    pass
-            # Release the lock whether we exited via done/error/disconnect.
-            if download_lock.locked():
-                download_lock.release()
+                    try:
+                        # v0.8.4 — heartbeat tightened from 15s to 5s so
+                        # the disconnect-detection loop is more responsive
+                        # (worst-case lock-held-after-disconnect window
+                        # drops from ~15s to ~5s). Bandwidth cost is
+                        # trivial: ``: heartbeat\n\n`` is ~14 bytes.
+                        data = await asyncio.wait_for(queue.get(), timeout=5)
+                        yield f"data: {json.dumps(data)}\n\n"
+                        if data.get("status") in ("done", "error"):
+                            break
+                    except asyncio.TimeoutError:
+                        # Heartbeat every 5 s — keeps proxy connections
+                        # alive and gives the disconnect check above a
+                        # chance to fire frequently.
+                        yield ": heartbeat\n\n"
+            finally:
+                # Make sure the worker is fully reaped — even on the normal
+                # exit path (``done`` message) we await it to surface any
+                # unexpected exceptions in logs.
+                if task is not None and not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        # CancelledError is expected; any other exception was
+                        # already routed to the queue as an "error" message.
+                        pass
+                # Release the lock whether we exited via done/error/disconnect.
+                if _lock_held and download_lock.locked():
+                    _lock_held = False
+                    download_lock.release()
 
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache"},
+        )
+    except BaseException:
+        # Setup phase failed (e.g. invalid fmt/q crashed build_format_selector).
+        # Release the lock ourselves since the generator never ran. Without
+        # this, a failing request would block every subsequent download
+        # until process restart.
+        if _lock_held and download_lock.locked():
+            _lock_held = False
+            download_lock.release()
+        raise
 
 
 # --------------------------------------------------------------------------- #
@@ -391,13 +440,20 @@ async def download(url: str, request: Request, fmt: str = "best", q: str = "best
 async def list_files():
     files = []
     for p in sorted(DOWNLOADS.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-        if p.is_file() and not p.name.startswith('.'):
-            stat = p.stat()
-            files.append({
-                "name":     p.name,
-                "size":     stat.st_size,
-                "modified": stat.st_mtime,
-            })
+        if not p.is_file() or p.name.startswith('.'):
+            continue
+        # v0.8.4 — skip in-progress yt-dlp downloads. yt-dlp writes to
+        # ``<final-name>.part`` while streaming; without this filter the
+        # file list shows partial-size files (5 MB then jumping to 120 MB
+        # mid-stream) and the user clicks them expecting a finished file.
+        if p.name.endswith(".part"):
+            continue
+        stat = p.stat()
+        files.append({
+            "name":     p.name,
+            "size":     stat.st_size,
+            "modified": stat.st_mtime,
+        })
     return {"files": files, "downloads_dir": str(DOWNLOADS)}
 
 
@@ -503,14 +559,10 @@ async def tag_file(req: TagRequest):
             },
         )
     except ValueError as e:
-        # Unsupported extension — convert to 415 with the same message
-        # the original handler used.
-        raise HTTPException(
-            status_code=415,
-            detail=f"Tagging not supported for {file_path.suffix} (use .mp3 / .m4a / .flac / .ogg)"
-            if not str(e)
-            else str(e),
-        )
+        # Unsupported extension — ValueError message from tags.write_id3
+        # is already user-friendly ("Tagging not supported for .xyz
+        # (use .mp3 / .m4a / .flac / .ogg)"), so just pass it through.
+        raise HTTPException(status_code=415, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Tagging failed: {e}")
 

@@ -113,9 +113,22 @@ def run_tray(port: int, stop_event: threading.Event):
                     stderr=subprocess.DEVNULL,
                 )
             elif sys.platform == "darwin":
-                os.system(
-                    f'osascript -e \'display notification "Dashboard: {url}" '
-                    f'with title "yt-dlp Gundam" subtitle "Server running"\''
+                # v0.8.4 — use subprocess.Popen with argv instead of
+                # os.system + f-string interpolation. osascript's Apple-
+                # Event handler tolerates most chars in the URL but the
+                # shell-quoting layer above was fragile (backslash, single
+                # quote, $() expansion). subprocess with argv avoids the
+                # shell entirely; osascript gets the literal string.
+                # Popen (not run) so the tray thread stays responsive
+                # while osascript launches the notification center UI.
+                script = (
+                    f'display notification "Dashboard: {url}" '
+                    f'with title "yt-dlp Gundam" subtitle "Server running"'
+                )
+                subprocess.Popen(
+                    ["osascript", "-e", script],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                 )
             # else: Linux / other — silent no-op (no portable API).
         except Exception:

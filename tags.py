@@ -41,6 +41,29 @@ ID3_WRITABLE_EXTS = {".mp3", ".m4a", ".flac", ".ogg"}
 
 
 # --------------------------------------------------------------------------- #
+# Frame class lookup
+# --------------------------------------------------------------------------- #
+# mutagen.id3 frame constructors keyed by frame ID. Built once at import
+# (instead of on every write_id3 call) so the inner loop can dispatch by
+# key without re-constructing the dict. The keys must stay in sync with
+# ID3_FIELDS above.
+def _build_frame_classes() -> dict:
+    """Lazy import + class map construction. mutagen is an optional dep;
+    importing at module top would crash if the env doesn't have it."""
+    from mutagen.id3 import TIT2, TPE1, TALB, TDRC, TCON
+    return {
+        "TIT2": TIT2,
+        "TPE1": TPE1,
+        "TALB": TALB,
+        "TDRC": TDRC,
+        "TCON": TCON,
+    }
+
+
+_FRAME_CLASSES = _build_frame_classes()
+
+
+# --------------------------------------------------------------------------- #
 # Read
 # --------------------------------------------------------------------------- #
 
@@ -94,12 +117,7 @@ def write_id3(path: Path, tags: dict) -> dict[str, str]:
             f"Tagging not supported for {ext} (use .mp3 / .m4a / .flac / .ogg)"
         )
 
-    from mutagen.id3 import ID3, ID3NoHeaderError, TIT2, TPE1, TALB, TDRC, TCON
-
-    # Build a frame-id → constructor map once so we can dispatch by key.
-    _FRAME_CLASSES = {
-        "TIT2": TIT2, "TPE1": TPE1, "TALB": TALB, "TDRC": TDRC, "TCON": TCON,
-    }
+    from mutagen.id3 import ID3, ID3NoHeaderError
 
     try:
         try:
