@@ -21,8 +21,8 @@ VSVersionInfo(
   ffi=FixedFileInfo(
     # filevers and prodvers should be always a tuple with four items: (1, 2, 3, 4)
     # Set not needed items to zero 0. May not be 0.0.0.0.
-    filevers=(0, 8, 0, 0),
-    prodvers=(0, 8, 0, 0),
+    filevers=(0, 8, 4, 0),
+    prodvers=(0, 8, 4, 0),
     # Contains a bitmask designed to only include the Attributes that are part of the version-Information structure.
     # Typically this is the combination of VS_FF_DEBUG, VS_FF_PRERELEASE, and VS_FF_PATCHED.
     mask=0x3F,
@@ -48,11 +48,11 @@ VSVersionInfo(
           [
             StringStruct(u'CompanyName', u'yt-dlp Gundam'),
             StringStruct(u'FileDescription', u'yt-dlp Gundam Dashboard'),
-            StringStruct(u'FileVersion', u'0.8.0'),
+            StringStruct(u'FileVersion', u'0.8.4'),
             StringStruct(u'InternalName', u'yt_dlp_gundam'),
             StringStruct(u'OriginalFilename', u'yt_dlp_gundam.exe'),
             StringStruct(u'ProductName', u'yt-dlp Gundam Dashboard'),
-            StringStruct(u'ProductVersion', u'0.8.0')
+            StringStruct(u'ProductVersion', u'0.8.4')
           ]
         )
       ]

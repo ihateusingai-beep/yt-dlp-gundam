@@ -13,6 +13,7 @@ doesn't exist on the user's disk, so we must check _MEIPASS first.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -66,9 +67,14 @@ def get_ffmpeg_version() -> str:
     if not FFMPEG_PATH:
         return "not found"
     try:
+        # v0.8.4 — pin encoding to UTF-8 and replace undecodable bytes
+        # instead of crashing on Windows cp1252 locales where ffmpeg's
+        # banner may contain non-ASCII characters (©, ®, etc.).
         result = subprocess.run(
             [FFMPEG_PATH, "-version"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            timeout=10,
         )
         first_line = result.stdout.splitlines()[0] if result.stdout else "unknown"
         return first_line
@@ -78,10 +84,26 @@ def get_ffmpeg_version() -> str:
 
 def ffmpeg_source_label(path: str) -> str:
     """Classify `path` as 'bundled' (shipped with the app) or 'system' (the
-    user's install). The bundled source is the imageio-ffmpeg cached
-    binary; the system source is anything else (PATH, _MEIPASS, manual)."""
+    user's install). Two bundled sources:
+      - PyInstaller frozen exe: ffmpeg.exe lives under sys._MEIPASS (this is
+        the spec-bundled `vendor/ffmpeg.exe`).
+      - Dev mode: imageio-ffmpeg's cached binary.
+    Anything else (shutil.which, C:\\ffmpeg, manual install) is 'system'."""
     try:
-        if "imageio" in path.lower() or "site-packages" in path:
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass and (path == meipass or path.startswith(meipass + os.sep)):
+            return "bundled"  # spec-bundled at _MEIPASS (vendor/ffmpeg.exe)
+        # v0.8.4 — anchor on path-segment boundaries instead of bare
+        # substring. Earlier versions matched any path containing
+        # "site-packages" (e.g. /home/x/myapp/site-packages-custom/ffmpeg)
+        # and mis-labeled user installs as bundled.
+        path_lower = path.lower()
+        if "/imageio" in path_lower or "\\imageio" in path_lower:
+            return "bundled"
+        if (
+            f"{os.sep}site-packages{os.sep}" in path_lower
+            or path_lower.startswith(f"site-packages{os.sep}")
+        ):
             return "bundled"
         return "system"
     except Exception:

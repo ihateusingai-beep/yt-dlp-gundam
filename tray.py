@@ -5,6 +5,7 @@ System tray icon for yt-dlp Gundam Dashboard.
 - Auto-loads icon from bundled .ico / .png (PyInstaller-friendly path)
 """
 import os
+import subprocess
 import sys
 import threading
 import webbrowser
@@ -70,21 +71,69 @@ def run_tray(port: int, stop_event: threading.Event):
             pass
 
     def on_status(icon, item):
-        # Quick native notification showing port + URL
+        """Quick native notification showing port + URL.
+
+        Platform implementations:
+          - Windows: PowerShell + .NET NotifyIcon balloon (no extra deps —
+            PowerShell is built into every supported Windows version, and
+            System.Windows.Forms.NotifyIcon ships with .NET Framework).
+          - macOS:   osascript (Apple's standard notification path).
+          - Linux:   silent no-op (no portable cross-DE notification API).
+        """
         try:
             if sys.platform == "win32":
-                from win10toast import ToastNotifier  # type: ignore
-            elif sys.platform == "darwin":
-                # Use osascript to display a native macOS notification
-                os.system(
-                    f'osascript -e \'display notification "Dashboard: {url}" '
-                    f'with title "yt-dlp Gundam" subtitle "Server running"\''
+                # PowerShell script, parameterized via $args[0] so `url` is
+                # passed as a separate argv entry — no shell-string injection
+                # even if a future change ever lets the port come from
+                # untrusted input. `Start-Sleep` + `Dispose` keeps the
+                # balloon visible ~5 s, then cleans up.
+                ps_script = (
+                    "param($u) "
+                    "Add-Type -AssemblyName System.Windows.Forms | Out-Null; "
+                    "Add-Type -AssemblyName System.Drawing | Out-Null; "
+                    "$n = New-Object System.Windows.Forms.NotifyIcon; "
+                    "$n.Icon = [System.Drawing.SystemIcons]::Information; "
+                    "$n.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info; "
+                    "$n.BalloonTipTitle = 'yt-dlp Gundam'; "
+                    "$n.BalloonTipText = \"Dashboard: $u\"; "
+                    "$n.Visible = $true; "
+                    "$n.ShowBalloonTip(5000); "
+                    "Start-Sleep -Milliseconds 5500; "
+                    "$n.Visible = $false; "
+                    "$n.Dispose()"
                 )
-                return
-            else:
-                return
+                # Popen (not run) so the tray thread stays responsive while
+                # the balloon is on-screen. CREATE_NO_WINDOW keeps the
+                # PowerShell console hidden. We deliberately don't wait —
+                # if the user spam-clicks, multiple balloons are fine.
+                subprocess.Popen(
+                    ["powershell", "-NoProfile", "-Command", ps_script, url],
+                    creationflags=0x08000000,  # CREATE_NO_WINDOW
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            elif sys.platform == "darwin":
+                # v0.8.4 — use subprocess.Popen with argv instead of
+                # os.system + f-string interpolation. osascript's Apple-
+                # Event handler tolerates most chars in the URL but the
+                # shell-quoting layer above was fragile (backslash, single
+                # quote, $() expansion). subprocess with argv avoids the
+                # shell entirely; osascript gets the literal string.
+                # Popen (not run) so the tray thread stays responsive
+                # while osascript launches the notification center UI.
+                script = (
+                    f'display notification "Dashboard: {url}" '
+                    f'with title "yt-dlp Gundam" subtitle "Server running"'
+                )
+                subprocess.Popen(
+                    ["osascript", "-e", script],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            # else: Linux / other — silent no-op (no portable API).
         except Exception:
-            return
+            # Notification is best-effort; never break the tray over a failed toast.
+            pass
 
     def on_quit(icon, item):
         stop_event.set()

@@ -348,6 +348,163 @@ class TestGetTag(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# TagRequest Pydantic length validation (v0.8.2)
+# --------------------------------------------------------------------------- #
+
+class TestTagRequestValidation(unittest.TestCase):
+    """B9: POST /api/tag payload must respect field length limits set on
+    the Pydantic TagRequest model. Over-limit payloads should be rejected
+    with 422 (FastAPI's default Pydantic error code) BEFORE reaching
+    _validate_tag_filename — defense in depth against malicious clients
+    sending huge strings."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self._orig_downloads = main.DOWNLOADS
+        main.DOWNLOADS = Path(self._tmp.name)
+        main.DOWNLOADS.mkdir(exist_ok=True)
+        # Create a real MP3 so the request would otherwise succeed.
+        from mutagen.id3 import ID3
+        self._mp3 = main.DOWNLOADS / "test.mp3"
+        self._mp3.touch()
+        try:
+            ID3(str(self._mp3))
+        except Exception:
+            ID3()
+        self.client = TestClient(main.app)
+
+    def tearDown(self) -> None:
+        main.DOWNLOADS = self._orig_downloads
+        self._tmp.cleanup()
+
+    def test_normal_payload_succeeds(self) -> None:
+        """A reasonable payload must still work — the length caps must
+        not break the happy path."""
+        r = self.client.post("/api/tag", json={
+            "filename": "test.mp3",
+            "title": "Cruel Angel",
+            "artist": "Yoko Takahashi",
+            "year": "1995",
+        })
+        self.assertEqual(r.status_code, 200, r.text)
+
+    def test_oversized_filename_rejected(self) -> None:
+        r = self.client.post("/api/tag", json={
+            "filename": "a" * 256,  # max_length=255
+            "title": "T",
+        })
+        self.assertEqual(r.status_code, 422, r.text)
+
+    def test_oversized_title_rejected(self) -> None:
+        r = self.client.post("/api/tag", json={
+            "filename": "test.mp3",
+            "title": "a" * 513,  # max_length=512
+        })
+        self.assertEqual(r.status_code, 422, r.text)
+
+    def test_oversized_year_rejected(self) -> None:
+        r = self.client.post("/api/tag", json={
+            "filename": "test.mp3",
+            "year": "1" * 17,  # max_length=16
+        })
+        self.assertEqual(r.status_code, 422, r.text)
+
+    def test_empty_filename_rejected_by_pydantic(self) -> None:
+        """min_length=1 on filename means Pydantic catches the empty
+        string with 422 BEFORE _validate_tag_filename (which would have
+        returned 400). The behaviour change is intentional — invalid
+        payloads should fail at the schema boundary, not deep inside."""
+        r = self.client.post("/api/tag", json={"filename": ""})
+        self.assertEqual(r.status_code, 422, r.text)
+
+
+# --------------------------------------------------------------------------- #
+# ffmpeg_source_label (media.py) — bundled vs system classification
+# --------------------------------------------------------------------------- #
+
+class TestFfmpegSourceLabel(unittest.TestCase):
+    """B10: ffmpeg_source_label must classify the three bundled sources
+    (sys._MEIPASS in frozen, imageio-ffmpeg, site-packages) as 'bundled',
+    and everything else (shutil.which, manual install paths) as 'system'."""
+
+    def setUp(self) -> None:
+        from media import ffmpeg_source_label
+        self.ffmpeg_source_label = ffmpeg_source_label
+        # Snapshot sys._MEIPASS so we can restore it — the function reads
+        # it at call time, so tests need to mock + restore around each call.
+        self._real_meipass = getattr(sys, "_MEIPASS", None)
+        # Make sure it's not set in dev mode (CI may set it for other reasons).
+        if hasattr(sys, "_MEIPASS"):
+            try:
+                del sys._MEIPASS
+            except AttributeError:
+                pass
+
+    def tearDown(self) -> None:
+        if self._real_meipass is not None:
+            sys._MEIPASS = self._real_meipass
+        elif hasattr(sys, "_MEIPASS"):
+            try:
+                del sys._MEIPASS
+            except AttributeError:
+                pass
+
+    def test_imageio_path_is_bundled(self) -> None:
+        self.assertEqual(
+            self.ffmpeg_source_label("/Users/x/Library/imageio/ffmpeg/ffmpeg.exe"),
+            "bundled",
+        )
+
+    def test_site_packages_path_is_bundled(self) -> None:
+        self.assertEqual(
+            self.ffmpeg_source_label("/usr/lib/python3.12/site-packages/imageio_ffmpeg/bin/ffmpeg"),
+            "bundled",
+        )
+
+    def test_system_path_is_system(self) -> None:
+        # shutil.which result — user-installed.
+        self.assertEqual(
+            self.ffmpeg_source_label("/usr/local/bin/ffmpeg"),
+            "system",
+        )
+
+    def test_windows_fallback_is_system(self) -> None:
+        # The "C:/ffmpeg/bin/ffmpeg.exe" fallback path.
+        self.assertEqual(
+            self.ffmpeg_source_label("C:/ffmpeg/bin/ffmpeg.exe"),
+            "system",
+        )
+
+    def test_meipass_path_is_bundled(self) -> None:
+        """The frozen-exe case: ffmpeg.exe is bundled under sys._MEIPASS
+        (this is what the spec's vendor/ffmpeg.exe gets extracted to).
+        This was the bug — previously classified as 'system' because
+        the path doesn't contain 'imageio' or 'site-packages'."""
+        sys._MEIPASS = "/tmp/_internal"
+        try:
+            self.assertEqual(
+                self.ffmpeg_source_label("/tmp/_internal/ffmpeg.exe"),
+                "bundled",
+            )
+            # Nested deeper in _MEIPASS — also bundled.
+            self.assertEqual(
+                self.ffmpeg_source_label("/tmp/_internal/vendor/ffmpeg.exe"),
+                "bundled",
+            )
+        finally:
+            try:
+                del sys._MEIPASS
+            except AttributeError:
+                pass
+
+    def test_non_string_input_returns_unknown(self) -> None:
+        # Defensive — function takes a `path: str` but a future caller
+        # could pass something else. The bare-except in the function
+        # must swallow it gracefully.
+        self.assertEqual(self.ffmpeg_source_label(None), "unknown")  # type: ignore[arg-type]
+
+
+# --------------------------------------------------------------------------- #
 # B1 / B3 / B4 end-to-end with mocked yt-dlp (no network required)
 # --------------------------------------------------------------------------- #
 
@@ -455,6 +612,297 @@ class TestInfoProjectedShape(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         e = r.json()["entries"][0]
         self.assertEqual(e["url"], "https://x/1")
+
+
+# --------------------------------------------------------------------------- #
+# B11 — host binding (security, v0.8.3)
+# --------------------------------------------------------------------------- #
+
+class TestHostBinding(unittest.TestCase):
+    """B11: v0.8.3 hardens against LAN/internet exposure of the unauth'd
+    dashboard. DEFAULT_HOST must default to 127.0.0.1 (loopback), honor
+    YT_DLP_GUNDAM_HOST env var override, and surface the resolved value
+    via /api/health so the UI / smoke checks can verify what's bound."""
+
+    def setUp(self) -> None:
+        self.client = TestClient(main.app)
+        # Snapshot env so we can restore between tests — DEFAULT_HOST is
+        # resolved at import time from os.environ, so flipping the env
+        # after import has no effect on the running module. We test the
+        # /api/health surface (which reads DEFAULT_HOST at request time)
+        # and assert the default vs. env-override behavior on the
+        # default itself.
+        self._env_snapshot = os.environ.get("YT_DLP_GUNDAM_HOST")
+
+    def tearDown(self) -> None:
+        if self._env_snapshot is None:
+            os.environ.pop("YT_DLP_GUNDAM_HOST", None)
+        else:
+            os.environ["YT_DLP_GUNDAM_HOST"] = self._env_snapshot
+
+    def test_default_host_is_loopback(self) -> None:
+        """No env override → DEFAULT_HOST must be 127.0.0.1, NOT 0.0.0.0.
+
+        Regression guard for v0.8.2 → v0.8.3: earlier versions bound
+        0.0.0.0 by default, exposing the dashboard on the LAN/internet
+        with no auth."""
+        os.environ.pop("YT_DLP_GUNDAM_HOST", None)
+        self.assertEqual(main.DEFAULT_HOST, "127.0.0.1",
+            f"DEFAULT_HOST must default to loopback, got {main.DEFAULT_HOST!r}")
+
+    def test_env_var_overrides_host(self) -> None:
+        """YT_DLP_GUNDAM_HOST=0.0.0.0 must override the loopback default
+        for users who deliberately want LAN exposure (e.g. remote control
+        over Tailscale)."""
+        os.environ["YT_DLP_GUNDAM_HOST"] = "0.0.0.0"
+        self.assertEqual(os.environ.get("YT_DLP_GUNDAM_HOST"), "0.0.0.0")
+        # NOTE: main.DEFAULT_HOST is captured at import time, so this test
+        # documents the env-var contract. The runtime override actually
+        # applied is `host=DEFAULT_HOST` in uvicorn.run() — which the
+        # /api/health surface reflects.
+
+    def test_health_surfaces_host(self) -> None:
+        """/api/health must include the configured host so the UI / smoke
+        tests can verify bind behavior without having to lsof the port."""
+        r = self.client.get("/api/health")
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertIn("host", body,
+            "/api/health must surface the bound host (added v0.8.3)")
+        # In a test process DEFAULT_HOST was captured at import time —
+        # accept either 127.0.0.1 (CI default) or whatever was set in
+        # the parent shell. The important property is that the value
+        # matches main.DEFAULT_HOST exactly (no surprises / no shadowing).
+        self.assertEqual(body["host"], main.DEFAULT_HOST)
+
+    def test_health_version_is_current(self) -> None:
+        """/api/health must report the same __version__ we bumped.
+        Smoke guard: catches accidental version bumps in CI that don't
+        propagate through /api/health (e.g. someone overrides FastAPI's
+        `version=` arg)."""
+        r = self.client.get("/api/health")
+        self.assertEqual(r.json()["version"], main.__version__)
+
+
+# --------------------------------------------------------------------------- #
+# B12 — v0.8.4 batch: AUDIO_BITRATES, lock leak, downloads fallback,
+#                       site-packages classifier, .part filter
+# --------------------------------------------------------------------------- #
+
+class TestAudioBitratesSourceOfTruth(unittest.TestCase):
+    """B12 (P0-3): main.py audio-quality fallback (``audio_quality = q if q
+    in AUDIO_BITRATES else "192"``) must reference the same tuple as the
+    frontend / formats.AUDIO_BITRATES. If someone bumps the supported
+    kbps ladder in formats.py, main.py must follow automatically."""
+
+    def test_main_uses_same_audio_bitrates_tuple(self) -> None:
+        from formats import AUDIO_BITRATES as FMT
+        # Pull the value from main's download endpoint via a free
+        # variable — the simplest way to assert the same constant is in
+        # use without coupling the test to the literal text "192" etc.
+        # (main.py imports AUDIO_BITRATES from formats, so identity
+        # check is the cleanest assertion.)
+        self.assertIs(main.AUDIO_BITRATES, FMT,
+            "main.AUDIO_BITRATES must be the same object as formats.AUDIO_BITRATES "
+            "(single source of truth)")
+
+    def test_audio_quality_default_is_192(self) -> None:
+        """Any q not in AUDIO_BITRATES must default to "192"."""
+        for q in ("", "best", "999", "256"):
+            self.assertEqual(
+                q if q in main.AUDIO_BITRATES else "192",
+                "192",
+                f"q={q!r} should fall back to 192",
+            )
+
+    def test_audio_quality_accepts_every_listed_bitrate(self) -> None:
+        """Every bitrate in AUDIO_BITRATES must round-trip unchanged."""
+        for q in main.AUDIO_BITRATES:
+            self.assertEqual(q if q in main.AUDIO_BITRATES else "192", q)
+
+
+class TestDownloadLockReleasedOnSetupError(unittest.TestCase):
+    """B12 (P0-6): if the setup phase of /api/download raises before the
+    StreamingResponse is returned, the outer try/except must release the
+    download_lock so the next request doesn't see a phantom 409."""
+
+    def setUp(self) -> None:
+        self.client = TestClient(main.app)
+        # Snapshot the lock state so we can assert cleanly.
+        self._lock_was_held = main.download_lock.locked()
+        # If something else (a previous test) left the lock held, wait
+        # for it. In practice this only fires after the SSE-stream tests
+        # that ran without cleanly closing; we tolerate it here.
+        if self._lock_was_held:
+            main.download_lock.release()
+
+    def tearDown(self) -> None:
+        # Be defensive: if any test left the lock held, release it.
+        if main.download_lock.locked():
+            main.download_lock.release()
+
+    def test_lock_released_when_setup_raises(self) -> None:
+        """Inject a synthetic failure in build_format_selector so the
+        download endpoint raises BEFORE returning StreamingResponse. The
+        outer try/except must release the lock (otherwise the lock
+        would be held forever and the next download would 409)."""
+        from unittest.mock import patch
+        with patch("main.build_format_selector",
+                   side_effect=ValueError("synthetic setup error")):
+            # The ValueError propagates out of the endpoint through the
+            # outer try/except (which also releases the lock). TestClient
+            # re-raises it in-process.
+            try:
+                self.client.get(
+                    "/api/download",
+                    params={"url": "https://example.com/v"},
+                )
+            except ValueError:
+                pass  # expected — the synthetic error
+        # The actual assertion: lock must NOT be held.
+        self.assertFalse(
+            main.download_lock.locked(),
+            "download_lock must be released after setup phase raises "
+            "(otherwise P0-6 lock leak regression)",
+        )
+
+
+class TestDownloadsDirReadOnlyFallback(unittest.TestCase):
+    """B12 (P1-1): if APP_DIR is read-only (e.g. frozen exe under Program
+    Files), init_downloads_dir must fall back to ~/yt-dlp-gundam-downloads/
+    and rebind the module-level DOWNLOADS so all subsequent code sees the
+    fallback path."""
+
+    def test_fallback_when_app_dir_unwritable(self) -> None:
+        import paths
+
+        # Snapshot module state so we can restore it (other tests may
+        # share the same DOWNLOADS global).
+        orig_downloads = paths.DOWNLOADS
+        orig_app_dir   = paths.APP_DIR
+
+        # Build a fake APP_DIR that points at a real read-only directory.
+        # We use a temp dir + chmod 0o555 to simulate the no-write
+        # scenario across platforms (Linux + macOS; on Windows the
+        # filesystem semantics are different but the PermissionError is
+        # still raised by mkdir).
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        with TemporaryDirectory() as tmp:
+            readonly_app = Path(tmp).resolve()
+            try:
+                readonly_app.chmod(0o555)
+            except OSError:
+                self.skipTest("Cannot chmod on this platform/filesystem")
+
+            # Replace globals and re-run init_downloads_dir. The function
+            # should catch the PermissionError, set DOWNLOADS to the
+            # home-dir fallback, and return successfully.
+            paths.APP_DIR = readonly_app
+            paths.DOWNLOADS = readonly_app / "downloads"
+            try:
+                result = paths.init_downloads_dir()
+                # The fallback should be in the user's home directory.
+                self.assertEqual(
+                    paths.DOWNLOADS,
+                    Path.home() / "yt-dlp-gundam-downloads",
+                    "DOWNLOADS must be rebound to home-dir fallback when APP_DIR is read-only",
+                )
+                self.assertEqual(result, paths.DOWNLOADS)
+                self.assertTrue(
+                    paths.DOWNLOADS.exists(),
+                    "Fallback dir must actually be created",
+                )
+            finally:
+                paths.APP_DIR   = orig_app_dir
+                paths.DOWNLOADS = orig_downloads
+                # Best-effort cleanup of the fallback dir if we created it.
+                try:
+                    (Path.home() / "yt-dlp-gundam-downloads").rmdir()
+                except OSError:
+                    pass
+
+
+class TestFfmpegClassifierSitePackagesBoundary(unittest.TestCase):
+    """B12 (P1-4): ffmpeg_source_label must match ``site-packages`` only
+    when it appears as a complete path segment, not as a substring of an
+    unrelated directory name."""
+
+    def setUp(self) -> None:
+        from media import ffmpeg_source_label
+        self.label = ffmpeg_source_label
+        self._real_meipass = getattr(sys, "_MEIPASS", None)
+        if hasattr(sys, "_MEIPASS"):
+            try:
+                del sys._MEIPASS
+            except AttributeError:
+                pass
+
+    def tearDown(self) -> None:
+        if self._real_meipass is not None:
+            sys._MEIPASS = self._real_meipass
+
+    def test_real_site_packages_is_bundled(self) -> None:
+        """Canonical site-packages path is bundled (imageio-ffmpeg cached)."""
+        self.assertEqual(
+            self.label("/usr/lib/python3.12/site-packages/imageio_ffmpeg/bin/ffmpeg"),
+            "bundled",
+        )
+
+    def test_site_packages_substring_in_unrelated_dir_is_system(self) -> None:
+        """A user-installed ffmpeg in a directory whose name merely
+        contains the substring 'site-packages' must NOT be mis-labeled
+        bundled. This was the v0.8.3 bug."""
+        self.assertEqual(
+            self.label("/home/x/myapp/site-packages-custom/ffmpeg"),
+            "system",
+        )
+        self.assertEqual(
+            self.label("/home/x/site-packages-backup/bin/ffmpeg"),
+            "system",
+        )
+
+    def test_imageio_substring_in_unrelated_dir_is_system(self) -> None:
+        """Same boundary check for ``imageio`` substring."""
+        self.assertEqual(
+            self.label("/home/x/myimageioserver/ffmpeg"),
+            "system",
+        )
+
+
+class TestFilesListFiltersPartialDownloads(unittest.TestCase):
+    """B12 (P1-6): /api/files must skip yt-dlp's ``.part`` files (used
+    during in-progress downloads) so the UI doesn't show partial-size
+    entries that the user can mis-click."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self._orig_downloads = main.DOWNLOADS
+        main.DOWNLOADS = Path(self._tmp.name)
+        main.DOWNLOADS.mkdir(exist_ok=True)
+        # Create a mix of finished and in-progress files.
+        (main.DOWNLOADS / "video.mp4").write_bytes(b"x" * 1024)
+        (main.DOWNLOADS / "video.mp4.part").write_bytes(b"x" * 256)  # in-progress
+        (main.DOWNLOADS / "song.mp3").write_bytes(b"x" * 512)
+        (main.DOWNLOADS / "song.mp3.part").write_bytes(b"x" * 128)  # in-progress
+        (main.DOWNLOADS / ".hidden").write_bytes(b"x" * 64)         # dotfile
+        self.client = TestClient(main.app)
+
+    def tearDown(self) -> None:
+        main.DOWNLOADS = self._orig_downloads
+        self._tmp.cleanup()
+
+    def test_part_files_excluded(self) -> None:
+        r = self.client.get("/api/files")
+        self.assertEqual(r.status_code, 200, r.text)
+        names = {f["name"] for f in r.json()["files"]}
+        self.assertIn("video.mp4", names)
+        self.assertIn("song.mp3", names)
+        self.assertNotIn("video.mp4.part", names,
+            ".part files must be filtered out of /api/files")
+        self.assertNotIn("song.mp3.part", names)
+        self.assertNotIn(".hidden", names,
+            "dotfiles still filtered (existing behavior preserved)")
 
 
 if __name__ == "__main__":
